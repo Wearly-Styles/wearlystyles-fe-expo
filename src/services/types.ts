@@ -1,0 +1,109 @@
+export type ApiResponse<T> = {
+  success: boolean;
+  statusCode?: number;
+  message?: string;
+  data?: T;
+  timestamp?: string;
+};
+
+export type NormalizedWeather = {
+  tempC: number | null;
+  conditionCode: number | null;
+  rainProbability: number;
+  humidity: number | null;
+  tags: string[];
+  source: string;
+  observedAt: string;
+};
+
+export type NormalizedEvent = {
+  id?: string;
+  title: string;
+  start?: string;
+  end?: string;
+  location?: string;
+  eventType: string;
+  dressCode: string;
+  timeOfDay: string;
+};
+
+export type NormalizedClosetItem = {
+  id: number;
+  name?: string;
+  category?: string;
+  color?: string;
+  image?: string;
+  season?: string;
+  material?: string;
+  isFavorite?: boolean;
+  tags: string[];
+};
+
+export type OutfitRecommendation = {
+  eventId?: string;
+  eventTitle?: string;
+  eventType?: string;
+  style?: string;
+  items: number[];
+  notes: string[];
+};
+
+export type RecommendationResponse = {
+  primary: OutfitRecommendation;
+  alternatives: OutfitRecommendation[];
+  recommendations?: OutfitRecommendation[];
+  model: string;
+};
+
+export type User = {
+  id: number;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  role?: string;
+};
+
+export type AuthPayload = {
+  user: Partial<User>;
+  token: string;
+  refreshToken: string;
+};
+
+export type Category = {
+  id: number;
+  name: string;
+};
+
+export type Tag = {
+  id: number;
+  name: string;
+};
+
+export type ClothingItem = {
+  id: number;
+  name?: string;
+  categoryId?: number | null;
+  color?: string;
+  image?: string;
+  season?: string;
+  material?: string;
+  description?: string;
+  isFavorite?: boolean;
+};
+
+export type OutfitEntity = {
+  id: number;
+  name?: string;
+  occasion?: string;
+  weather?: string;
+  isFavorite?: boolean;
+};
+
+export type OutfitPlan = {
+  id: number;
+  outfitId: number;
+  planDate: string;
+  planType?: string | null;
+  reminderSent?: boolean | null;
+  outfit?: OutfitEntity;
+};
