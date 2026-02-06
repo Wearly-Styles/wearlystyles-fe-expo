@@ -29,9 +29,13 @@ export const createClothingItem = async ({
     type: "image/jpeg",
   } as any);
 
-  const res = await api.post("/mobile/clothing/items", formData, {
+  const res = await api.post("/mobile/closet/items", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
 
   return res.data.data;
+};
+export const getClosetItems = async (userId: number) => {
+  const res = await api.get(`/mobile/closet?userId=${userId}`); 
+  return res.data.data; 
 };

@@ -16,8 +16,6 @@ api.interceptors.request.use((config) => {
     url: config.url,
     auth: config.headers.Authorization,
   });
-  console.log("🧪 RAW TOKEN:", process.env.EXPO_PUBLIC_DEV_TOKEN);
-
 
   return config;
 });
