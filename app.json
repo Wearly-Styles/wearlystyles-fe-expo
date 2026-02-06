@@ -2,6 +2,7 @@
   "expo": {
     "name": "WearlyStyles",
     "slug": "WearlyStyles",
+    "owner": "kimm000",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -12,6 +13,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.kimm000.wearlystyles",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -41,8 +43,13 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bdb10dd6-7b2f-4273-bfc8-7248a5a1e7e9"
+      }
     }
   }
 }
