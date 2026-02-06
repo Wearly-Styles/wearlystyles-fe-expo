@@ -1,17 +1,27 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createCategory } from "../services/category.service";
-const DEV_USER_ID = Number(process.env.EXPO_PUBLIC_DEV_USER_ID);
+import { getUserId } from "../utils/auth";
 
 export const useCreateCategory = () => {
   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: (name: string) => createCategory(name, DEV_USER_ID),
+  const { data: userId } = useQuery({
+    queryKey: ["userId"],
+    queryFn: getUserId,
+    staleTime: Infinity,
+  });
 
+  return useMutation({
+    mutationFn: (name: string) => {
+      if (!userId) {
+        throw new Error("User ID not found");
+      }
+      return createCategory(name, userId);
+    },
 
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["categories", DEV_USER_ID],
+        queryKey: ["categories", userId],
       });
     },
   });

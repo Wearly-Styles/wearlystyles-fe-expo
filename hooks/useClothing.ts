@@ -1,9 +1,14 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createClothingItem } from "../services/clothing.service";
-
-const DEV_USER_ID = Number(process.env.EXPO_PUBLIC_DEV_USER_ID);
+import { getUserId } from "../utils/auth";
 
 export const useClothing = () => {
+  const { data: userId, isLoading } = useQuery({
+    queryKey: ["userId"],
+    queryFn: getUserId,
+    staleTime: Infinity,
+  });
+
   return useMutation({
     mutationFn: (payload: {
       name: string;
@@ -12,14 +17,15 @@ export const useClothing = () => {
       categoryId: number;
       imageUri: string;
     }) => {
-      if (!DEV_USER_ID) {
+      if (!userId) {
         throw new Error("User ID not found");
       }
 
       return createClothingItem({
         ...payload,
-        userId: DEV_USER_ID,
+        userId,
       });
     },
+    enabled: !!userId && !isLoading,
   });
 };

@@ -29,12 +29,16 @@ export const login = async (data: LoginPayload) => {
 
   const { token: accessToken, refreshToken, user } = res.data.data;
 
-  await AsyncStorage.setItem('accessToken', accessToken);
-  await AsyncStorage.setItem('refreshToken', refreshToken);
-  await AsyncStorage.setItem('user', JSON.stringify(user));
+  await AsyncStorage.multiSet([
+    ['accessToken', accessToken],
+    ['refreshToken', refreshToken],
+    ['user', JSON.stringify(user)],
+    ['USER_ID', String(user.id)], // ✅ QUAN TRỌNG
+  ]);
 
   return res.data;
 };
+
 
 export const loginWithGoogle = async (authCode: string) => {
   const res = await authApi.post('/auth/google', {

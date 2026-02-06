@@ -1,13 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCategories } from "../services/category.service";
-
-const DEV_USER_ID = Number(process.env.EXPO_PUBLIC_DEV_USER_ID);
+import { getUserId } from "../utils/auth";
 
 export const useCategories = () => {
+  const { data: userId, isLoading: loadingUser } = useQuery({
+    queryKey: ["userId"],
+    queryFn: getUserId,
+    staleTime: Infinity,
+  });
+
   return useQuery({
-    queryKey: ["categories", DEV_USER_ID],
-    queryFn: () => getCategories(DEV_USER_ID),
-    enabled: !!DEV_USER_ID,
+    queryKey: ["categories", userId],
+    queryFn: () => getCategories(userId as number),
+    enabled: !!userId && !loadingUser,
     staleTime: 1000 * 60 * 10,
   });
 };

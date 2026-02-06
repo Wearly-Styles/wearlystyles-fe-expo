@@ -39,7 +39,6 @@ export const useLogin = () => {
         try {
             setLoading(true);
             const res = await login({ email, password });
-            console.log('LOGIN SUCCESS:', res);
             router.replace('/(tabs)');
         } catch (err) {
             const message = axios.isAxiosError(err)

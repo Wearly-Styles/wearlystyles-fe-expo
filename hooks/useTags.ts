@@ -1,13 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { getTags } from "../services/tag.service";
+import { getUserId } from "../utils/auth";
 
-const DEV_USER_ID = Number(process.env.EXPO_PUBLIC_DEV_USER_ID);
 
 export const useTags = () => {
+   const { data: userId, isLoading: loadingUser } = useQuery({
+    queryKey: ["userId"],
+    queryFn: getUserId,
+    staleTime: Infinity,
+  });
+
   return useQuery({
-    queryKey: ["tags", DEV_USER_ID],
-    queryFn: () => getTags(DEV_USER_ID),
-    enabled: !!DEV_USER_ID,
-    staleTime: 1000 * 60 * 10, // cache 10 phút
+    queryKey: ["tags", userId],
+    queryFn: () => getTags(userId as number),
+    enabled: !!userId && !loadingUser,
+    staleTime: 1000 * 60 * 10, 
   });
 };
