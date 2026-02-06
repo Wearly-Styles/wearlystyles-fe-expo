@@ -40,7 +40,6 @@ export const useSignUp = () => {
       );
     } catch (err) {
       if (axios.isAxiosError(err)) {
-        console.log('❌ REGISTER ERROR:', err.response?.data);
         Alert.alert(
           'Registration failed',
           err.response?.data?.message || 'An error occurred during registration'
