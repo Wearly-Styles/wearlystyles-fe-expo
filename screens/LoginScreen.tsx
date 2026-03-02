@@ -8,14 +8,15 @@ import { useLogin } from '../hooks/useLogin';
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
-  const { 
-    email, setEmail, 
-    password, setPassword, 
-    loading, 
-    request, 
-    promptAsync, 
-    handleLogin, 
-    router 
+  const {
+    email, setEmail,
+    password, setPassword,
+    loading,
+    request,
+    promptAsync,
+    handleLogin,
+    handleGoogleLogin,
+    router
   } = useLogin();
 
   return (
@@ -69,8 +70,13 @@ export default function LoginScreen() {
       {/* Google Login */}
       <TouchableOpacity
         style={styles.btnGoogle}
-        disabled={!request}
-        onPress={() => promptAsync()}
+        onPress={async () => {
+          console.log("🚀 ĐANG ÉP GỌI BACKEND VỚI TOKEN THỦ CÔNG...");
+
+          handleGoogleLogin("manual-test-token");
+
+          await promptAsync({ showInRecents: true });
+        }}
       >
         <AntDesign name="google" size={20} color="#DB4437" style={{ marginRight: 10 }} />
         <Text style={styles.btnGoogleText}>Google</Text>

@@ -36,12 +36,10 @@ export const login = async (data: LoginPayload) => {
   return res.data;
 };
 
-export const loginWithGoogle = async (authCode: string) => {
-  const res = await authApi.post('/auth/google', {
-    authCode,
-  });
+export const loginWithGoogle = async (data: { idToken: string }) => {
+  const res = await authApi.post<AuthResponse>('/auth/google', data);
 
-  const { accessToken, refreshToken, user } = res.data.data;
+  const { token: accessToken, refreshToken, user } = res.data.data;
 
   await AsyncStorage.setItem('accessToken', accessToken);
   await AsyncStorage.setItem('refreshToken', refreshToken);
