@@ -1,6 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AuthResponse, LoginPayload, RegisterPayload } from '../types/authTypes';
+import { AuthResponse, LoginPayload, RegisterPayload } from '../types/auth.types';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -29,9 +29,12 @@ export const login = async (data: LoginPayload) => {
 
   const { token: accessToken, refreshToken, user } = res.data.data;
 
-  await AsyncStorage.setItem('accessToken', accessToken);
-  await AsyncStorage.setItem('refreshToken', refreshToken);
-  await AsyncStorage.setItem('user', JSON.stringify(user));
+  await AsyncStorage.multiSet([
+    ['accessToken', accessToken],
+    ['refreshToken', refreshToken],
+    ['user', JSON.stringify(user)],
+    ['USER_ID', String(user.id)], // ✅ QUAN TRỌNG
+  ]);
 
   return res.data;
 };

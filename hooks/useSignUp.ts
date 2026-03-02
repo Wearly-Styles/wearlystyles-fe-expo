@@ -1,8 +1,8 @@
+import axios from 'axios';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import axios from 'axios';
-import { register } from '../services/authService';
+import { register } from '../services/auth.service';
 
 export const useSignUp = () => {
   const router = useRouter();
@@ -40,7 +40,6 @@ export const useSignUp = () => {
       );
     } catch (err) {
       if (axios.isAxiosError(err)) {
-        console.log('❌ REGISTER ERROR:', err.response?.data);
         Alert.alert(
           'Registration failed',
           err.response?.data?.message || 'An error occurred during registration'

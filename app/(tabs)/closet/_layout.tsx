@@ -1,18 +1,16 @@
-// app/(tabs)/closet/_layout.tsx
 import { Drawer } from "expo-router/drawer";
+import ClosetDrawerContent from "@/screens/ClosetDrawerContent";
 
 export default function ClosetDrawerLayout() {
   return (
     <Drawer
+      drawerContent={() => <ClosetDrawerContent />}
       screenOptions={{
-        headerShown: true,
-        drawerStyle: { width: "50%" }, 
+        headerShown: false,
+        drawerStyle: { width: "60%" },
       }}
     >
-      <Drawer.Screen
-        name="index"
-        options={{ title: "My Closet" }}
-      />
+      <Drawer.Screen name="index" options={{ title: "" }} />
     </Drawer>
   );
 }

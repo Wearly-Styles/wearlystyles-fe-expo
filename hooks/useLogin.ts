@@ -1,11 +1,10 @@
-import * as WebBrowser from 'expo-web-browser';
-import { useState, useEffect } from 'react';
-import { Alert } from 'react-native';
 import axios from 'axios';
-import { useRouter } from 'expo-router';
 import * as Google from 'expo-auth-session/providers/google';
-import * as AuthSession from 'expo-auth-session';
-import { login, loginWithGoogle } from '../services/authService';
+import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useState } from 'react';
+import { Alert } from 'react-native';
+import { login, loginWithGoogle } from '../services/auth.service';
 
 WebBrowser.maybeCompleteAuthSession();
 export const useLogin = () => {
@@ -50,7 +49,6 @@ export const useLogin = () => {
         try {
             setLoading(true);
             const res = await login({ email, password });
-            console.log('LOGIN SUCCESS:', res);
             router.replace('/(tabs)');
         } catch (err) {
             const message = axios.isAxiosError(err)
