@@ -1,155 +1,190 @@
-//D:\wearlystyles-fe-expo\WearlyStyles\app\screens\ProfileScreen.tsx
-import { useEffect, useState } from "react";
+// app/screens/ProfileScreen.tsx
+
+import React, { useState } from "react";
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
-  ActivityIndicator,
+  ScrollView,
   TouchableOpacity,
+  Image,
+  FlatList,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+
 import AppHeader from "../components/AppHeader";
 import BottomNav from "../components/BottomNav";
 import { theme } from "../constants/theme";
-import { authApi, userApi } from "../services/outfitApi";
-import { getAuthToken, setAuthToken } from "../services/apiClient";
+import { authApi } from "../services/outfitApi";
+import { setAuthToken } from "../services/apiClient";
 import { setStoredRefreshToken, setStoredToken } from "../services/authStore";
-import type { User } from "../services/types";
+import { useProfile } from "../hooks/useProfile";
+
+const WARDROBE_DATA = [
+  { id: "1", image: "https://via.placeholder.com/150" },
+  { id: "2", image: "https://via.placeholder.com/150" },
+  { id: "3", image: "https://via.placeholder.com/150" },
+  { id: "4", image: "https://via.placeholder.com/150" },
+];
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"info" | "wardrobe">("info");
   const [loggingOut, setLoggingOut] = useState(false);
-  const [requiresAuth, setRequiresAuth] = useState(false);
 
-  useEffect(() => {
-    let isActive = true;
+  const { profile, loading, error } = useProfile();
 
-    const loadUser = async () => {
-      setLoading(true);
-      setError(null);
-      if (!getAuthToken()) {
-        setRequiresAuth(true);
-        setLoading(false);
-        return;
-      }
-      try {
-        const users = await userApi.listUsers(1, 1);
-        if (isActive && users?.length) {
-          setUser(users[0]);
-          setRequiresAuth(false);
-        }
-      } catch (err) {
-        if (isActive) {
-          setError(err instanceof Error ? err.message : "Failed to load");
-        }
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadUser();
-    return () => {
-      isActive = false;
-    };
-  }, []);
+  const user = profile;
+  const userProfile = profile?.profile;
 
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
       await authApi.logout();
     } catch {
-      // ignore logout errors
     } finally {
       setAuthToken(null);
       await setStoredToken(null);
       await setStoredRefreshToken(null);
-      setLoggingOut(false);
       router.replace("/login");
     }
   };
 
+  const renderInfo = () => (
+    <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Personal Information</Text>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="person" size={20} color="#F4B400" />
+          <Text style={styles.infoText}>{userProfile?.fullName}</Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="mail" size={20} color="#F4B400" />
+          <Text style={styles.infoText}>{user?.email}</Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="gift" size={20} color="#F4B400" />
+          <Text style={styles.infoText}>
+            {userProfile?.dateOfBirth
+              ? new Date(userProfile.dateOfBirth).toLocaleDateString()
+              : "N/A"}
+          </Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="location" size={20} color="#F4B400" />
+          <Text style={styles.infoText}>{userProfile?.location || "N/A"}</Text>
+        </View>
+        <Text style={styles.sectionTitle}>Bio</Text>
+        <Text style={styles.bioText}>
+          {userProfile?.bio || "No bio available"}
+        </Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Account Actions</Text>
+
+        <TouchableOpacity
+          style={[styles.logoutButton, loggingOut && { opacity: 0.6 }]}
+          onPress={handleLogout}
+          disabled={loggingOut}
+        >
+          {loggingOut ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.logoutText}>Sign Out</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+
+  const renderWardrobe = () => (
+    <FlatList
+      data={WARDROBE_DATA}
+      numColumns={2}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={{ paddingBottom: 120 }}
+      renderItem={({ item }) => (
+        <View style={styles.imageWrapper}>
+          <Image source={{ uri: item.image }} style={styles.wardrobeImage} />
+          <Ionicons
+            name="heart"
+            size={18}
+            color="red"
+            style={styles.heartIcon}
+          />
+        </View>
+      )}
+    />
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#F4B400" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text>{error}</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <AppHeader
-            title="Profile"
-            subtitle="Style stats and preferences"
-            onBackPress={() => router.back()}
-          />
-          {loading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color={theme.colors.primaryDark} />
-              <Text style={styles.loadingText}>Loading profile...</Text>
-            </View>
-          ) : error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : null}
-          {requiresAuth ? (
-            <View style={styles.card}>
-              <Text style={styles.cardText}>
-                Sign in to view your profile details.
-              </Text>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => router.replace("/login")}
-              >
-                <Text style={styles.primaryText}>Go to login</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Style profile</Text>
-            <Text style={styles.cardText}>
-              Casual • Neutral palette • Minimal accessories
-            </Text>
-          </View>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Outfit history</Text>
-            <Text style={styles.cardText}>
-              18 outfits saved • 6 worn this month
-            </Text>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => router.push("/plans")}
-            >
-              <Text style={styles.primaryText}>View schedule</Text>
+      <View style={{ flex: 1 }}>
+        <AppHeader
+          title="Profile"
+          subtitle="Manage your personal style"
+          onBackPress={() => router.back()}
+          rightAction={
+            <TouchableOpacity onPress={() => router.push("/edit-profile")}>
+              <Ionicons name="create-outline" size={22} color="#F4B400" />
             </TouchableOpacity>
-          </View>
-          {user ? (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Account</Text>
-              <Text style={styles.cardText}>
-                {user.firstName || "User"} {user.lastName || ""}
-              </Text>
-              <Text style={styles.cardText}>{user.email || "No email"}</Text>
-            </View>
-          ) : null}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Account actions</Text>
-            <TouchableOpacity
-              style={[styles.primaryButton, loggingOut && styles.buttonDisabled]}
-              onPress={handleLogout}
-              disabled={loggingOut}
-            >
-              {loggingOut ? (
-                <ActivityIndicator color={theme.colors.text} />
-              ) : (
-                <Text style={styles.primaryText}>Sign out</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+          }
+        />
+
+        {/* Tabs */}
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            style={[styles.tabItem, activeTab === "info" && styles.activeTab]}
+            onPress={() => setActiveTab("info")}
+          >
+            <Ionicons
+              name="person-circle"
+              size={22}
+              color={activeTab === "info" ? "#F4B400" : "#aaa"}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tabItem,
+              activeTab === "wardrobe" && styles.activeTab,
+            ]}
+            onPress={() => setActiveTab("wardrobe")}
+          >
+            <Ionicons
+              name="images"
+              size={22}
+              color={activeTab === "wardrobe" ? "#F4B400" : "#aaa"}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {activeTab === "info" ? renderInfo() : renderWardrobe()}
+
         <BottomNav active="profile" />
       </View>
     </SafeAreaView>
@@ -157,69 +192,90 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safeArea: { flex: 1, backgroundColor: "#fff" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  tabBar: {
+    flexDirection: "row",
+    marginTop: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+
+  tabItem: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    alignItems: "center",
+    paddingVertical: 12,
   },
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
+
+  activeTab: {
+    borderBottomWidth: 2,
+    borderBottomColor: "#F4B400",
   },
-  scrollContent: {
-    paddingBottom: 140,
-  },
+
   card: {
-    marginTop: theme.spacing.lg,
-    marginHorizontal: theme.spacing.lg,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    padding: theme.spacing.lg,
+    margin: 16,
+    padding: 16,
+    backgroundColor: "#fff",
+    borderRadius: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 1,
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  loadingRow: {
+
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+
+  infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
+    gap: 10,
+    marginBottom: 12,
   },
-  loadingText: {
-    fontSize: 12,
-    color: theme.colors.textSoft,
-  },
-  errorText: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#C44536",
-  },
-  cardTitle: {
+
+  infoText: {
     fontSize: 14,
-    fontWeight: "700",
-    color: theme.colors.text,
   },
-  cardText: {
-    marginTop: 6,
-    fontSize: 12,
-    color: theme.colors.textMuted,
+
+  bioText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#666",
   },
-  primaryButton: {
-    marginTop: theme.spacing.md,
-    backgroundColor: theme.colors.primary,
+
+  logoutButton: {
+    marginTop: 10,
+    backgroundColor: "#F4B400",
     paddingVertical: 10,
-    borderRadius: theme.radius.pill,
+    borderRadius: 20,
     alignItems: "center",
   },
-  primaryText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: theme.colors.text,
+
+  logoutText: {
+    color: "#fff",
+    fontWeight: "600",
   },
-  buttonDisabled: {
-    opacity: 0.7,
+
+  imageWrapper: {
+    flex: 1,
+    margin: 6,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+  },
+
+  wardrobeImage: {
+    width: "100%",
+    height: 180,
+  },
+
+  heartIcon: {
+    position: "absolute",
+    top: 8,
+    right: 8,
   },
 });
