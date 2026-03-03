@@ -220,6 +220,7 @@ export default function OutfitSelectionScreen() {
               filters={EVENT_TYPES}
               activeIndex={eventIndex}
               onPress={setEventIndex}
+              scrollable
             />
 
             <View style={styles.sectionDivider} />
@@ -237,6 +238,7 @@ export default function OutfitSelectionScreen() {
               filters={STYLE_TYPES}
               activeIndex={styleIndex}
               onPress={setStyleIndex}
+              scrollable
             />
 
             <View style={styles.sectionDivider} />
@@ -307,9 +309,16 @@ export default function OutfitSelectionScreen() {
             disabled={!canGenerate || loading}
           >
             {loading ? (
-              <ActivityIndicator color={theme.colors.text} />
+              <View style={styles.primaryButtonLoading}>
+                <ActivityIndicator color={theme.colors.text} />
+                <Text style={styles.primaryText}>Generating...</Text>
+              </View>
             ) : (
-              <Text style={styles.primaryText}>Generate outfit</Text>
+              <Text style={styles.primaryText} numberOfLines={1}>
+                {selectedDate
+                  ? `Generate for ${selectedDate.label} ${selectedDate.day}`
+                  : "Generate outfit"}
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -418,7 +427,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    gap: theme.spacing.md,
+    gap: theme.spacing.sm,
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   stepHeader: {
     flexDirection: "row",
@@ -465,18 +479,22 @@ const styles = StyleSheet.create({
   dateRow: {
     paddingTop: theme.spacing.sm,
     paddingBottom: theme.spacing.sm,
+    paddingRight: theme.spacing.md,
     gap: theme.spacing.sm,
   },
   dateChip: {
     width: 64,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   dateChipActive: {
     backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primaryDark,
   },
   dateLabel: {
     fontSize: 10,
@@ -501,6 +519,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.card,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     alignItems: "center",
   },
   infoText: {
@@ -514,7 +534,7 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
   },
   primaryButton: {
-    marginTop: theme.spacing.lg,
+    marginTop: theme.spacing.md,
     marginHorizontal: theme.spacing.lg,
     backgroundColor: theme.colors.primary,
     paddingVertical: 14,
@@ -530,6 +550,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: theme.colors.text,
+  },
+  primaryButtonLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
   },
   buttonDisabled: {
     opacity: 0.6,

@@ -71,15 +71,23 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
           </View>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Included items</Text>
-            <View style={styles.itemsRow}>
-              {outfit.items.map((item) => (
-                <View key={item.id} style={styles.itemCard}>
-                  <Image source={{ uri: item.image }} style={styles.itemImage} />
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
-                </View>
-              ))}
-            </View>
+            {outfit.items.length ? (
+              <View style={styles.itemsRow}>
+                {outfit.items.map((item) => (
+                  <View key={item.id} style={styles.itemCard}>
+                    <Image source={{ uri: item.image }} style={styles.itemImage} />
+                    <Text style={styles.itemTitle}>{item.title}</Text>
+                    <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.reasonCard}>
+                <Text style={styles.reasonText}>
+                  Item details are not available for this scheduled outfit.
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Why it works</Text>

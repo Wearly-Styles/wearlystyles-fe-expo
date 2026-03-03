@@ -51,12 +51,6 @@ export default function BottomNav({ active }: BottomNavProps) {
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => router.push("/add-item")}
-      >
-        <Ionicons name="add" size={28} color={theme.colors.surface} />
-      </TouchableOpacity>
-      <TouchableOpacity
         style={styles.navItem}
         onPress={() => router.push("/explore")}
       >
@@ -124,19 +118,5 @@ const styles = StyleSheet.create({
   navTextActive: {
     color: theme.colors.text,
     fontWeight: "700",
-  },
-  addButton: {
-    height: 54,
-    width: 54,
-    borderRadius: 27,
-    backgroundColor: theme.colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: -40,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
 });
