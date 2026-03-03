@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -8,9 +8,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
 import FilterPills from "../components/FilterPills";
 import OutfitCard from "../components/OutfitCard";
@@ -57,16 +58,31 @@ const formatDateKey = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-const buildCalendarDays = (count = 7) => {
-  const today = new Date();
-  return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
+const parseDateKey = (key: string) => {
+  const [year, month, day] = key.split("-").map((part) => Number(part));
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    return null;
+  }
+  return new Date(year, month - 1, day, 12);
+};
+
+const buildMonthDays = (monthDate: Date) => {
+  const year = monthDate.getFullYear();
+  const monthIndex = monthDate.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const dayNumber = index + 1;
+    const date = new Date(year, monthIndex, dayNumber, 12);
     return {
       key: formatDateKey(date),
       dayLabel: DAY_LABELS[date.getDay()],
-      dayNumber: date.getDate(),
-      monthLabel: MONTH_LABELS[date.getMonth()],
+      dayNumber,
+      monthLabel: MONTH_LABELS[monthIndex],
       date,
     };
   });
@@ -118,7 +134,56 @@ export default function OutfitSuggestionsScreen() {
   const [selectedSlot, setSelectedSlot] = useState(0);
   const calendarToken = process.env.EXPO_PUBLIC_CALENDAR_TOKEN?.trim();
 
-  const calendarDays = useMemo(() => buildCalendarDays(7), []);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+  const monthStart = useMemo(
+    () => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1),
+    [calendarMonth],
+  );
+  const monthEnd = useMemo(
+    () =>
+      new Date(
+        calendarMonth.getFullYear(),
+        calendarMonth.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      ),
+    [calendarMonth],
+  );
+  const monthEndExclusive = useMemo(
+    () => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1),
+    [calendarMonth],
+  );
+  const calendarDays = useMemo(
+    () => buildMonthDays(calendarMonth),
+    [calendarMonth],
+  );
+  const calendarMonthLabel = useMemo(() => {
+    const label = MONTH_LABELS[calendarMonth.getMonth()];
+    return `${label} ${calendarMonth.getFullYear()}`;
+  }, [calendarMonth]);
+
+  const handlePrevMonth = () => {
+    setCalendarMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1),
+    );
+  };
+
+  const handleNextMonth = () => {
+    setCalendarMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1),
+    );
+  };
+
+  const handleGoToCurrentMonth = () => {
+    const today = new Date();
+    setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+  };
   const closetOptions = useMemo<OutfitItem[]>(() => {
     if (closetItems.length) {
       return closetItems.map(toOutfitItem);
@@ -160,14 +225,11 @@ export default function OutfitSuggestionsScreen() {
     let isActive = true;
     const loadCalendar = async () => {
       try {
-        const start = new Date();
-        const end = new Date(start);
-        end.setDate(start.getDate() + 7);
         const events = await contextApi.getCalendar({
           accessToken: calendarToken,
-          timeMin: start.toISOString(),
-          timeMax: end.toISOString(),
-          maxResults: 20,
+          timeMin: monthStart.toISOString(),
+          timeMax: monthEndExclusive.toISOString(),
+          maxResults: 100,
         });
         if (isActive) {
           setCalendarEvents(events ?? []);
@@ -183,7 +245,7 @@ export default function OutfitSuggestionsScreen() {
     return () => {
       isActive = false;
     };
-  }, [calendarToken]);
+  }, [calendarToken, monthStart, monthEndExclusive]);
 
   const displayItems = editableOutfit?.items ?? [];
 
@@ -207,27 +269,34 @@ export default function OutfitSuggestionsScreen() {
     return mapped;
   };
 
-  useEffect(() => {
-    let isActive = true;
-    if (!getAuthToken()) return () => {};
-    const loadPlans = async () => {
-      try {
-        const from = calendarDays[0]?.date.toISOString();
-        const to = calendarDays[calendarDays.length - 1]?.date.toISOString();
-        const plans = await outfitPlanApi.listPlans(from, to);
-        if (!isActive) return;
-        setScheduledOutfits(mapPlansToSchedule(plans));
-      } catch {
-        if (isActive) {
-          setScheduledOutfits({});
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const loadPlans = async () => {
+        if (!getAuthToken()) {
+          if (isActive) setScheduledOutfits({});
+          return;
         }
-      }
-    };
-    loadPlans();
-    return () => {
-      isActive = false;
-    };
-  }, [calendarDays]);
+        try {
+          const from = monthStart.toISOString();
+          const to = monthEnd.toISOString();
+          const plans = await outfitPlanApi.listPlans(from, to);
+          if (!isActive) return;
+          const mapped = mapPlansToSchedule(plans);
+          setScheduledOutfits(mapped);
+          setOutfitCache(Object.values(mapped).map((entry) => entry.outfit));
+        } catch {
+          if (isActive) {
+            setScheduledOutfits({});
+          }
+        }
+      };
+      loadPlans();
+      return () => {
+        isActive = false;
+      };
+    }, [monthStart, monthEnd]),
+  );
 
   const handleToggleEdit = () => {
     if (!editableOutfit) return;
@@ -268,7 +337,11 @@ export default function OutfitSuggestionsScreen() {
     });
   };
 
-  const handleScheduleOutfit = async (dateKey: string, date: Date) => {
+  const handleScheduleOutfit = async (
+    dateKey: string,
+    date: Date,
+    existingPlanId?: number,
+  ) => {
     if (!editableOutfit) return;
     if (!getAuthToken()) {
       setRequiresAuth(true);
@@ -278,6 +351,7 @@ export default function OutfitSuggestionsScreen() {
 
     try {
       setLoading(true);
+      setError(null);
       const items = (editableOutfit.items || [])
         .map((item) => Number(String(item.id).split("-")[0]))
         .filter((id) => Number.isFinite(id));
@@ -293,29 +367,93 @@ export default function OutfitSuggestionsScreen() {
         items,
       });
 
-      const plans = await outfitPlanApi.createPlans([
-        {
-          outfitId: created.id,
-          planDate: date.toISOString(),
-        },
-      ]);
-
-      const plan = plans[0];
+      const plan = existingPlanId
+        ? await outfitPlanApi.updatePlan(existingPlanId, {
+            outfitId: created.id,
+            planDate: date.toISOString(),
+          })
+        : (await outfitPlanApi.createPlans([
+            {
+              outfitId: created.id,
+              planDate: date.toISOString(),
+            },
+          ]))[0];
+      if (!plan?.id) {
+        throw new Error("Failed to schedule outfit.");
+      }
+      const scheduled = {
+        ...editableOutfit,
+        id: String(created.id),
+      };
       setScheduledOutfits((prev) => ({
         ...prev,
         [dateKey]: {
           planId: plan.id,
-          outfit: {
-            ...editableOutfit,
-            id: String(created.id),
-          },
+          outfit: scheduled,
         },
       }));
+      setOutfitCache([scheduled]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to schedule outfit.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRemoveSchedule = async (dateKey: string, planId: number) => {
+    if (!getAuthToken()) {
+      setRequiresAuth(true);
+      setError("Please sign in to manage your schedule.");
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      await outfitPlanApi.deletePlan(planId);
+      setScheduledOutfits((prev) => {
+        const next = { ...prev };
+        delete next[dateKey];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove scheduled outfit.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePressCalendarDay = (dateKey: string, date: Date) => {
+    const scheduled = scheduledOutfits[dateKey];
+    if (!scheduled) {
+      if (!editableOutfit) {
+        setError("Generate an outfit before scheduling.");
+        return;
+      }
+      void handleScheduleOutfit(dateKey, date);
+      return;
+    }
+
+    Alert.alert(
+      "Scheduled outfit",
+      "This day already has a scheduled outfit.",
+      [
+        {
+          text: "View",
+          onPress: () => router.push(`/outfit/${scheduled.outfit.id}`),
+        },
+        {
+          text: "Replace",
+          onPress: () =>
+            void handleScheduleOutfit(dateKey, date, scheduled.planId),
+        },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => void handleRemoveSchedule(dateKey, scheduled.planId),
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   const handleSelectOutfit = (outfit: Outfit) => {
@@ -358,9 +496,16 @@ export default function OutfitSuggestionsScreen() {
         return;
       }
 
-      const orderedDates = calendarDays.filter((day) =>
-        selectedDates.has(day.key),
-      );
+      const orderedDates = Array.from(selectedDates)
+        .sort()
+        .map((key) => {
+          const date = parseDateKey(key);
+          if (!date) return null;
+          return { key, date };
+        })
+        .filter(
+          (value): value is { key: string; date: Date } => value !== null,
+        );
 
       const results: Outfit[] = [];
       for (const day of orderedDates) {
@@ -375,7 +520,9 @@ export default function OutfitSuggestionsScreen() {
         });
         const mapped = mapRecommendationsToOutfits(rec, closet, weather);
         if (mapped.length) {
-          results.push(...mapped.map((item) => ({ ...item, id: `${day.key}-${item.id}` })));
+          results.push(
+            ...mapped.map((item) => ({ ...item, id: `${day.key}-${item.id}` })),
+          );
         }
       }
 
@@ -468,7 +615,33 @@ export default function OutfitSuggestionsScreen() {
               <Text style={styles.sectionLink}>View plans</Text>
             </TouchableOpacity>
           </View>
+          <View style={styles.calendarNavRow}>
+            <Text style={styles.calendarNavLabel}>{calendarMonthLabel}</Text>
+            <View style={styles.calendarNavButtons}>
+              <TouchableOpacity
+                style={styles.calendarNavButton}
+                onPress={handlePrevMonth}
+                accessibilityLabel="Previous month"
+              >
+                <Text style={styles.calendarNavText}>‹</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.calendarTodayButton}
+                onPress={handleGoToCurrentMonth}
+              >
+                <Text style={styles.calendarTodayText}>Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.calendarNavButton}
+                onPress={handleNextMonth}
+                accessibilityLabel="Next month"
+              >
+                <Text style={styles.calendarNavText}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           <ScrollView
+            key={calendarMonthLabel}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.calendarRow}
@@ -484,7 +657,7 @@ export default function OutfitSuggestionsScreen() {
                     scheduled ? styles.calendarCardActive : null,
                   ]}
                   activeOpacity={0.85}
-                  onPress={() => handleScheduleOutfit(day.key, day.date)}
+                  onPress={() => handlePressCalendarDay(day.key, day.date)}
                 >
                   <Text style={styles.calendarDay}>{day.dayLabel}</Text>
                   <Text style={styles.calendarDate}>{day.dayNumber}</Text>
@@ -528,6 +701,7 @@ export default function OutfitSuggestionsScreen() {
             <Text style={styles.sectionNote}>Generate for this date</Text>
           </View>
           <ScrollView
+            key={`pick-${calendarMonthLabel}`}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dateRow}
@@ -677,7 +851,12 @@ export default function OutfitSuggestionsScreen() {
           ) : null}
 
           {editableOutfit && displayItems.length ? (
-            <View style={styles.itemRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.itemRow}
+              contentContainerStyle={styles.itemRowContent}
+            >
               {displayItems.map((item, index) => (
                 <TouchableOpacity
                   key={item.id}
@@ -700,11 +879,15 @@ export default function OutfitSuggestionsScreen() {
                       style={styles.itemImage}
                     />
                   </View>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+                  <Text style={styles.itemTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.itemSubtitle} numberOfLines={1}>
+                    {item.subtitle}
+                  </Text>
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
 
           {isEditing && editableOutfit && closetOptions.length ? (
@@ -820,10 +1003,60 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.pill,
     alignItems: "center",
   },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
   generateText: {
     fontSize: 12,
     fontWeight: "700",
     color: theme.colors.text,
+  },
+  calendarNavRow: {
+    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  calendarNavLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  calendarNavButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+  },
+  calendarNavButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarNavText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  calendarTodayButton: {
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarTodayText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
   },
   calendarRow: {
     paddingHorizontal: theme.spacing.lg,
@@ -1016,16 +1249,18 @@ const styles = StyleSheet.create({
     color: theme.colors.textSoft,
   },
   itemRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     marginTop: theme.spacing.lg,
-    paddingHorizontal: theme.spacing.md,
+  },
+  itemRowContent: {
+    paddingHorizontal: theme.spacing.lg,
+    gap: theme.spacing.sm,
+    paddingBottom: theme.spacing.xs,
   },
   itemCard: {
-    flex: 1,
+    width: 112,
     alignItems: "center",
-    marginHorizontal: 6,
     paddingVertical: 12,
+    paddingHorizontal: 10,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
     shadowColor: "#000",

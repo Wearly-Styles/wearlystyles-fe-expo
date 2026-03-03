@@ -16,7 +16,7 @@ import * as WebBrowser from "expo-web-browser";
 import Constants from "expo-constants";
 import { theme } from "../constants/theme";
 import { authApi } from "../services/outfitApi";
-import { getApiBaseUrl, isApiError, setAuthToken } from "../services/apiClient";
+import { isApiError, setAuthToken } from "../services/apiClient";
 import { setStoredRefreshToken, setStoredToken } from "../services/authStore";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -27,8 +27,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>("");
-  const [authDebug, setAuthDebug] = useState<string>("");
   const expoClientId = process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID;
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
   const androidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
@@ -61,16 +59,6 @@ export default function LoginScreen() {
   const [request, response, promptAsync] = Google.useAuthRequest(googleConfig);
 
   useEffect(() => {
-    setDebugInfo(
-      [
-        `redirectUri=${redirectUri}`,
-        `clientId=${expoClientId || webClientId || "missing"}`,
-        `baseUrl=${getApiBaseUrl()}`,
-      ].join("\n"),
-    );
-  }, [redirectUri, expoClientId, webClientId]);
-
-  useEffect(() => {
     if (response?.type !== "success") return;
     const code = response.params?.code;
     if (!code) {
@@ -81,10 +69,6 @@ export default function LoginScreen() {
       setLoading(true);
       setError(null);
       try {
-        console.log(
-          "[GoogleAuth] calling BE:",
-          `${getApiBaseUrl()}/mobile/auth/login/google-code`,
-        );
         const result = await authApi.loginWithGoogleCode({
           code,
           redirectUri,
@@ -94,11 +78,6 @@ export default function LoginScreen() {
         await setStoredRefreshToken(result.refreshToken);
         router.replace("/(tabs)");
       } catch (err) {
-        if (isApiError(err)) {
-          console.log("[GoogleAuth] BE error:", err.status, err.message);
-        } else {
-          console.log("[GoogleAuth] BE error:", err);
-        }
         setError(err instanceof Error ? err.message : "Google login failed");
       } finally {
         setLoading(false);
@@ -109,10 +88,6 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (!response) return;
-    const safeParams = response.params
-      ? JSON.stringify(response.params)
-      : "no-params";
-    setAuthDebug(`response.type=${response.type}\nparams=${safeParams}`);
     if (response.type !== "success") {
       setError(`Google auth ${response.type}`);
     }
@@ -167,8 +142,6 @@ export default function LoginScreen() {
 
           <View style={styles.card}>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
-            <Text style={styles.debugText}>{debugInfo}</Text>
-            {authDebug ? <Text style={styles.debugText}>{authDebug}</Text> : null}
             <Text style={styles.label}>Email</Text>
             <TextInput
               value={email}

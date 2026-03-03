@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import AppHeader from "../components/AppHeader";
 import FilterPills from "../components/FilterPills";
 import BottomNav from "../components/BottomNav";
@@ -158,14 +159,6 @@ export default function WardrobeScreen() {
             subtitle="Pick pieces to build outfits faster"
             onBackPress={() => router.back()}
           />
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => router.push("/add-item")}
-            >
-              <Text style={styles.addButtonText}>Add item</Text>
-            </TouchableOpacity>
-          </View>
           <View style={styles.filterWrap}>
             <FilterPills
               filters={filters}
@@ -235,6 +228,15 @@ export default function WardrobeScreen() {
             </View>
           ) : null}
         </ScrollView>
+
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push("/add-item")}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={28} color={theme.colors.surface} />
+        </TouchableOpacity>
+
         <BottomNav active="wardrobe" />
       </View>
     </SafeAreaView>
@@ -257,21 +259,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
   },
-  actionRow: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.md,
-    alignItems: "flex-end",
-  },
-  addButton: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 8,
-    borderRadius: theme.radius.pill,
+  fab: {
+    position: "absolute",
+    right: theme.spacing.lg,
+    bottom: 96,
+    height: 54,
+    width: 54,
+    borderRadius: 27,
     backgroundColor: theme.colors.primary,
-  },
-  addButtonText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: theme.colors.text,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   loadingRow: {
     flexDirection: "row",
