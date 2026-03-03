@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -6,14 +6,20 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
 import { theme } from "../constants/theme";
 import { outfitPlanApi } from "../services/outfitApi";
 import { getAuthToken } from "../services/apiClient";
 import type { OutfitPlan } from "../services/types";
+import type { Outfit } from "../constants/mockOutfits";
+import { setOutfitCache } from "../utils/outfitStore";
+
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -32,42 +38,60 @@ export default function OutfitPlansScreen() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const dateRange = useMemo(() => {
+  const buildDateRange = () => {
     const from = new Date();
     const to = new Date(from);
     to.setDate(from.getDate() + 14);
     return { from: from.toISOString(), to: to.toISOString() };
-  }, []);
+  };
 
-  useEffect(() => {
-    if (!getAuthToken()) {
-      setRequiresAuth(true);
-      return;
-    }
-    let isActive = true;
-    const loadPlans = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await outfitPlanApi.listPlans(dateRange.from, dateRange.to);
-        if (isActive) {
-          setPlans(data || []);
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const loadPlans = async () => {
+        if (!getAuthToken()) {
+          if (isActive) {
+            setRequiresAuth(true);
+            setPlans([]);
+          }
+          return;
         }
-      } catch (err) {
-        if (isActive) {
-          setError(err instanceof Error ? err.message : "Failed to load plans");
+        setLoading(true);
+        setError(null);
+        try {
+          const range = buildDateRange();
+          const data = await outfitPlanApi.listPlans(range.from, range.to);
+          if (!isActive) return;
+          const nextPlans = data || [];
+          setPlans(nextPlans);
+          setRequiresAuth(false);
+          const outfitsToCache: Outfit[] = nextPlans.map((plan) => ({
+            id: String(plan.outfitId),
+            title: plan.outfit?.name || `Outfit #${plan.outfitId}`,
+            subtitle: plan.outfit?.occasion || "Planned look",
+            image: FALLBACK_IMAGE,
+            tags: [plan.outfit?.occasion || "Planned"],
+            items: [],
+            weather: plan.outfit?.weather || "Weather unavailable",
+            mood: plan.planType || "Planned",
+          }));
+          setOutfitCache(outfitsToCache);
+        } catch (err) {
+          if (isActive) {
+            setError(err instanceof Error ? err.message : "Failed to load plans");
+          }
+        } finally {
+          if (isActive) {
+            setLoading(false);
+          }
         }
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    };
-    loadPlans();
-    return () => {
-      isActive = false;
-    };
-  }, [dateRange.from, dateRange.to]);
+      };
+      loadPlans();
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   const handleDelete = async (id: number) => {
     setDeletingId(id);
@@ -79,6 +103,22 @@ export default function OutfitPlansScreen() {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const handleConfirmDelete = (id: number) => {
+    Alert.alert(
+      "Remove from schedule",
+      "Remove this outfit from your schedule?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => void handleDelete(id),
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -115,9 +155,17 @@ export default function OutfitPlansScreen() {
             <Text style={styles.errorText}>{error}</Text>
           ) : null}
 
+          {!loading && !error && !requiresAuth && plans.length === 0 ? (
+            <Text style={styles.emptyText}>No planned outfits yet.</Text>
+          ) : null}
 
           {plans.map((plan) => (
-            <View key={plan.id} style={styles.planCard}>
+            <TouchableOpacity
+              key={plan.id}
+              style={styles.planCard}
+              activeOpacity={0.85}
+              onPress={() => router.push(`/outfit/${plan.outfitId}`)}
+            >
               <View style={styles.planHeader}>
                 <View style={styles.datePill}>
                   <Text style={styles.dateText}>{formatDate(plan.planDate)}</Text>
@@ -127,7 +175,7 @@ export default function OutfitPlansScreen() {
                     styles.deleteButton,
                     deletingId === plan.id && styles.buttonDisabled,
                   ]}
-                  onPress={() => handleDelete(plan.id)}
+                  onPress={() => handleConfirmDelete(plan.id)}
                   disabled={deletingId === plan.id}
                 >
                   {deletingId === plan.id ? (
@@ -150,7 +198,7 @@ export default function OutfitPlansScreen() {
                   </View>
                 ) : null}
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </ScrollView>
       </View>

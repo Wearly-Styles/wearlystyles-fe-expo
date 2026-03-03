@@ -1,12 +1,14 @@
 import type { Outfit } from "../constants/mockOutfits";
 
-let cachedOutfits: Outfit[] = [];
+const outfitById = new Map<string, Outfit>();
 
 export const setOutfitCache = (outfits: Outfit[]) => {
-  cachedOutfits = outfits;
+  outfits.forEach((outfit) => {
+    outfitById.set(outfit.id, outfit);
+  });
 };
 
-export const getOutfitCache = () => cachedOutfits;
+export const getOutfitCache = () => Array.from(outfitById.values());
 
 export const getOutfitById = (id: string) =>
-  cachedOutfits.find((outfit) => outfit.id === id);
+  outfitById.get(id);

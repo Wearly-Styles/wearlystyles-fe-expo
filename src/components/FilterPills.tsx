@@ -1,19 +1,21 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
 import { theme } from "../constants/theme";
 
 type FilterPillsProps = {
   filters: string[];
   activeIndex?: number;
   onPress?: (index: number) => void;
+  scrollable?: boolean;
 };
 
 export default function FilterPills({
   filters,
   activeIndex = 0,
   onPress,
+  scrollable = false,
 }: FilterPillsProps) {
-  return (
-    <View style={styles.container}>
+  const content = (
+    <View style={[styles.container, scrollable && styles.containerScrollable]}>
       {filters.map((label, index) => {
         const isActive = index === activeIndex;
         return (
@@ -21,6 +23,10 @@ export default function FilterPills({
             key={label}
             style={[styles.pill, isActive && styles.pillActive]}
             onPress={() => onPress?.(index)}
+            activeOpacity={0.85}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
           >
             <Text style={[styles.text, isActive && styles.textActive]}>
               {label}
@@ -29,6 +35,18 @@ export default function FilterPills({
         );
       })}
     </View>
+  );
+
+  if (!scrollable) return content;
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContent}
+    >
+      {content}
+    </ScrollView>
   );
 }
 
@@ -39,9 +57,15 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     rowGap: theme.spacing.sm,
   },
+  containerScrollable: {
+    flexWrap: "nowrap",
+  },
+  scrollContent: {
+    paddingRight: theme.spacing.md,
+  },
   pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.surface,
     borderWidth: 1,
@@ -49,7 +73,12 @@ const styles = StyleSheet.create({
   },
   pillActive: {
     backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
+    borderColor: theme.colors.primaryDark,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   text: {
     fontSize: 12,
@@ -57,6 +86,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   textActive: {
-    color: theme.colors.surface,
+    color: theme.colors.text,
   },
 });

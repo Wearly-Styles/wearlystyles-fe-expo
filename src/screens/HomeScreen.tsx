@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
 import OutfitCard from "../components/OutfitCard";
@@ -133,36 +133,54 @@ export default function HomeScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    let isActive = true;
-    const loadPlans = async () => {
-      if (!getAuthToken()) return;
-      try {
-        const from = new Date();
-        const to = new Date(from);
-        to.setDate(from.getDate() + 7);
-        const plans = await outfitPlanApi.listPlans(from.toISOString(), to.toISOString());
-        if (!isActive) return;
-        const map: Record<string, { title: string; outfitId: number }> = {};
-        plans.forEach((plan) => {
-          const key = new Date(plan.planDate).toISOString().slice(0, 10);
-          map[key] = {
-            title: plan.outfit?.name || `Outfit #${plan.outfitId}`,
-            outfitId: plan.outfitId,
-          };
-        });
-        setScheduledByDate(map);
-      } catch {
-        if (isActive) {
-          setScheduledByDate({});
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const loadPlans = async () => {
+        if (!getAuthToken()) {
+          if (isActive) setScheduledByDate({});
+          return;
         }
-      }
-    };
-    loadPlans();
-    return () => {
-      isActive = false;
-    };
-  }, []);
+        try {
+          const from = new Date();
+          const to = new Date(from);
+          to.setDate(from.getDate() + 7);
+          const plans = await outfitPlanApi.listPlans(from.toISOString(), to.toISOString());
+          if (!isActive) return;
+          const map: Record<string, { title: string; outfitId: number }> = {};
+          const outfitsToCache: Outfit[] = [];
+          plans.forEach((plan) => {
+            const title = plan.outfit?.name || `Outfit #${plan.outfitId}`;
+            const key = new Date(plan.planDate).toISOString().slice(0, 10);
+            map[key] = {
+              title,
+              outfitId: plan.outfitId,
+            };
+            outfitsToCache.push({
+              id: String(plan.outfitId),
+              title,
+              subtitle: plan.outfit?.occasion || "Planned look",
+              image: FALLBACK_IMAGE,
+              tags: [plan.outfit?.occasion || "Planned"],
+              items: [],
+              weather: plan.outfit?.weather || "Weather unavailable",
+              mood: plan.planType || "Planned",
+            });
+          });
+          setScheduledByDate(map);
+          setOutfitCache(outfitsToCache);
+        } catch {
+          if (isActive) {
+            setScheduledByDate({});
+          }
+        }
+      };
+      loadPlans();
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   useEffect(() => {
     let isActive = true;
