@@ -22,8 +22,7 @@ type WeatherQuery = {
 export const contextApi = {
   getWeather: (query: WeatherQuery) =>
     request<NormalizedWeather>(
-      `/mobile/context/weather?lat=${query.lat}&lon=${query.lon}${
-        query.datetime ? `&datetime=${encodeURIComponent(query.datetime)}` : ""
+      `/mobile/context/weather?lat=${query.lat}&lon=${query.lon}${query.datetime ? `&datetime=${encodeURIComponent(query.datetime)}` : ""
       }`,
       { skipAuth: true },
     ),
@@ -122,6 +121,10 @@ export const clothingApi = {
   createItem: (formData: FormData) =>
     requestForm<ClothingItem>("/mobile/clothing/items", formData, {
       method: "POST",
+    }),
+  updateItem: (id: number, formData: FormData) =>
+    requestForm(`/mobile/clothing/items/${id}`, formData, {
+      method: "PATCH",
     }),
   deleteItem: (id: number) =>
     request<{ id: number }>(`/mobile/clothing/items/${id}`, {

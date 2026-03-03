@@ -17,6 +17,7 @@ import { theme } from "../constants/theme";
 import { clothingApi } from "../services/outfitApi";
 import { getAuthToken } from "../services/apiClient";
 import type { Category } from "../services/types";
+import { useLocalSearchParams } from "expo-router";
 
 type PickedImage = {
   uri: string;
@@ -48,6 +49,20 @@ export default function AddClothingItemScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
 
+  const {
+    id,
+    name: paramName,
+    categoryName,
+    image: paramImage,
+  } = useLocalSearchParams<{
+    id?: string;
+    name?: string;
+    categoryName?: string;
+    image?: string;
+  }>();
+
+  const isEditMode = !!id;
+
   const canSubmit = useMemo(
     () => Boolean(image),
     [image],
@@ -78,6 +93,28 @@ export default function AddClothingItemScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isEditMode) return;
+
+    if (paramName) setName(String(paramName));
+    if (paramImage) {
+      setImage({
+        uri: String(paramImage),
+        name: getFileNameFromUri(String(paramImage)),
+        type: "image/jpeg",
+      });
+    }
+
+    if (categoryName && categories.length) {
+      const found = categories.find(
+        (c) => c.name === categoryName,
+      );
+      if (found) {
+        setSelectedCategoryId(found.id);
+      }
+    }
+  }, [isEditMode, categories]);
+
   const handlePickImage = async () => {
     setError(null);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -93,7 +130,7 @@ export default function AddClothingItemScreen() {
       mediaTypeEnum
         ? [mediaTypeEnum]
         : (ImagePicker as unknown as { MediaTypeOptions?: { Images?: string } })
-            .MediaTypeOptions?.Images;
+          .MediaTypeOptions?.Images;
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes,
@@ -151,8 +188,13 @@ export default function AddClothingItemScreen() {
       if (season && season !== "All") form.append("season", season);
       form.append("isFavorite", String(isFavorite));
 
-      await clothingApi.createItem(form);
-      setSuccess("Item added to your wardrobe.");
+      if (isEditMode && id) {
+        await clothingApi.updateItem(Number(id), form);
+        setSuccess("Item updated successfully.");
+      } else {
+        await clothingApi.createItem(form);
+        setSuccess("Item added to your wardrobe.");
+      }
       router.replace("/wardrobe");
       setName("");
       setColor("");
