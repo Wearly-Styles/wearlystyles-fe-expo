@@ -1,3 +1,4 @@
+//D:\wearlystyles-fe-expo\WearlyStyles\app\(tabs)\closet\_layout.tsx
 import { Drawer } from "expo-router/drawer";
 import ClosetDrawerContent from "@/screens/ClosetDrawerContent";
 

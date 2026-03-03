@@ -1,3 +1,4 @@
+//D:\wearlystyles-fe-expo\WearlyStyles\app\(tabs)\_layout.tsx
 import { Tabs } from "expo-router";
 import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
