@@ -19,6 +19,7 @@ import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
+import { ClothingItem } from "../services";
 
 export default function WardrobeScreen() {
   const router = useRouter();
@@ -130,12 +131,7 @@ export default function WardrobeScreen() {
   }) => {
     router.push({
       pathname: "/add-item",
-      params: {
-        id: item.id,
-        name: item.title,
-        categoryName: item.category,
-        image: item.image,
-      },
+      params: { id: item.id },
     });
   };
 

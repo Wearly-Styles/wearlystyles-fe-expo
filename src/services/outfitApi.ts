@@ -122,6 +122,10 @@ export const clothingApi = {
     requestForm<ClothingItem>("/mobile/clothing/items", formData, {
       method: "POST",
     }),
+  getItemById: (id: number) =>
+    request<ClothingItem>(`/mobile/clothing/items/${id}`, {
+      method: "GET",
+    }),
   updateItem: (id: number, formData: FormData) =>
     requestForm(`/mobile/clothing/items/${id}`, formData, {
       method: "PATCH",

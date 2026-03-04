@@ -48,20 +48,32 @@ export default function AddClothingItemScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
+  const [loadingItem, setLoadingItem] = useState(false);
+
 
   const {
     id,
     name: paramName,
-    categoryName,
     image: paramImage,
+    categoryId: paramCategoryId,
+    color: paramColor,
+    material: paramMaterial,
+    description: paramDescription,
+    season: paramSeason,
+    isFavorite: paramIsFavorite,
   } = useLocalSearchParams<{
     id?: string;
     name?: string;
-    categoryName?: string;
     image?: string;
+    categoryId?: string;
+    color?: string;
+    material?: string;
+    description?: string;
+    season?: string;
+    isFavorite?: string;
   }>();
 
-  const isEditMode = !!id;
+  const isEditMode = Boolean(id);
 
   const canSubmit = useMemo(
     () => Boolean(image),
@@ -94,26 +106,55 @@ export default function AddClothingItemScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isEditMode) return;
+  if (!isEditMode || !id) return;
 
-    if (paramName) setName(String(paramName));
-    if (paramImage) {
-      setImage({
-        uri: String(paramImage),
-        name: getFileNameFromUri(String(paramImage)),
-        type: "image/jpeg",
-      });
-    }
+  let isActive = true;
 
-    if (categoryName && categories.length) {
-      const found = categories.find(
-        (c) => c.name === categoryName,
-      );
-      if (found) {
-        setSelectedCategoryId(found.id);
+  const loadItem = async () => {
+  try {
+    setLoadingItem(true);
+
+    console.log("CALLING API WITH ID:", id);
+
+    const response = await clothingApi.getItemById(Number(id));
+
+    console.log("RAW RESPONSE:", response);
+
+    setName(response.name || "");
+
+      setName(response.name || "");
+      setColor(response.color || "");
+      setMaterial(response.material || "");
+      setDescription(response.description || "");
+      setSeason(response.season || "All");
+      setIsFavorite(Boolean(response.isFavorite));
+      setSelectedCategoryId(response.categoryId || null);
+
+      if (response.image) {
+        setImage({
+          uri: response.image,
+          name: getFileNameFromUri(response.image),
+          type: "image/jpeg",
+        });
+      }
+    } catch (err: any) {
+  console.log("GET ITEM ERROR FULL:", err);
+  console.log("GET ITEM ERROR RESPONSE:", err?.response);
+  console.log("GET ITEM ERROR DATA:", err?.response?.data);
+  setError("Failed to load item.");
+} finally {
+      if (isActive) {
+        setLoadingItem(false);
       }
     }
-  }, [isEditMode, categories]);
+  };
+
+  loadItem();
+
+  return () => {
+    isActive = false;
+  };
+}, [isEditMode, id]);
 
   const handlePickImage = async () => {
     setError(null);
