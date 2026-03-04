@@ -10,8 +10,10 @@ export const useProfile = () => {
     try {
       setLoading(true);
       const data = await getMyProfile();
+      console.log("Fetched profile:", data); // <-- debug
       setProfile(data);
     } catch (err: any) {
+      console.error("Error fetching profile:", err); // <-- debug
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
