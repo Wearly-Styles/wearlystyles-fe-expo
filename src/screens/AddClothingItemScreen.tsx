@@ -17,6 +17,7 @@ import { theme } from "../constants/theme";
 import { clothingApi } from "../services/outfitApi";
 import { getAuthToken } from "../services/apiClient";
 import type { Category } from "../services/types";
+import { useLocalSearchParams } from "expo-router";
 
 type PickedImage = {
   uri: string;
@@ -47,6 +48,32 @@ export default function AddClothingItemScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
+  const [loadingItem, setLoadingItem] = useState(false);
+
+
+  const {
+    id,
+    name: paramName,
+    image: paramImage,
+    categoryId: paramCategoryId,
+    color: paramColor,
+    material: paramMaterial,
+    description: paramDescription,
+    season: paramSeason,
+    isFavorite: paramIsFavorite,
+  } = useLocalSearchParams<{
+    id?: string;
+    name?: string;
+    image?: string;
+    categoryId?: string;
+    color?: string;
+    material?: string;
+    description?: string;
+    season?: string;
+    isFavorite?: string;
+  }>();
+
+  const isEditMode = Boolean(id);
 
   const canSubmit = useMemo(
     () => Boolean(image),
@@ -78,6 +105,57 @@ export default function AddClothingItemScreen() {
     };
   }, []);
 
+  useEffect(() => {
+  if (!isEditMode || !id) return;
+
+  let isActive = true;
+
+  const loadItem = async () => {
+  try {
+    setLoadingItem(true);
+
+    console.log("CALLING API WITH ID:", id);
+
+    const response = await clothingApi.getItemById(Number(id));
+
+    console.log("RAW RESPONSE:", response);
+
+    setName(response.name || "");
+
+      setName(response.name || "");
+      setColor(response.color || "");
+      setMaterial(response.material || "");
+      setDescription(response.description || "");
+      setSeason(response.season || "All");
+      setIsFavorite(Boolean(response.isFavorite));
+      setSelectedCategoryId(response.categoryId || null);
+
+      if (response.image) {
+        setImage({
+          uri: response.image,
+          name: getFileNameFromUri(response.image),
+          type: "image/jpeg",
+        });
+      }
+    } catch (err: any) {
+  console.log("GET ITEM ERROR FULL:", err);
+  console.log("GET ITEM ERROR RESPONSE:", err?.response);
+  console.log("GET ITEM ERROR DATA:", err?.response?.data);
+  setError("Failed to load item.");
+} finally {
+      if (isActive) {
+        setLoadingItem(false);
+      }
+    }
+  };
+
+  loadItem();
+
+  return () => {
+    isActive = false;
+  };
+}, [isEditMode, id]);
+
   const handlePickImage = async () => {
     setError(null);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -93,7 +171,7 @@ export default function AddClothingItemScreen() {
       mediaTypeEnum
         ? [mediaTypeEnum]
         : (ImagePicker as unknown as { MediaTypeOptions?: { Images?: string } })
-            .MediaTypeOptions?.Images;
+          .MediaTypeOptions?.Images;
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes,
@@ -151,8 +229,13 @@ export default function AddClothingItemScreen() {
       if (season && season !== "All") form.append("season", season);
       form.append("isFavorite", String(isFavorite));
 
-      await clothingApi.createItem(form);
-      setSuccess("Item added to your wardrobe.");
+      if (isEditMode && id) {
+        await clothingApi.updateItem(Number(id), form);
+        setSuccess("Item updated successfully.");
+      } else {
+        await clothingApi.createItem(form);
+        setSuccess("Item added to your wardrobe.");
+      }
       router.replace("/wardrobe");
       setName("");
       setColor("");

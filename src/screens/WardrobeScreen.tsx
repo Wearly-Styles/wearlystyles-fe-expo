@@ -19,6 +19,7 @@ import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
+import { ClothingItem } from "../services";
 
 export default function WardrobeScreen() {
   const router = useRouter();
@@ -122,6 +123,18 @@ export default function WardrobeScreen() {
     );
   };
 
+  const handleEdit = (item: {
+    id: string;
+    title: string;
+    category: string;
+    image: string;
+  }) => {
+    router.push({
+      pathname: "/add-item",
+      params: { id: item.id },
+    });
+  };
+
   useEffect(() => loadCloset(), [loadCloset]);
 
   useFocusEffect(
@@ -195,6 +208,12 @@ export default function WardrobeScreen() {
                     ) : (
                       <Text style={styles.deleteText}>Delete</Text>
                     )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() => handleEdit(item)}
+                  >
+                    <Text style={styles.editText}>Edit</Text>
                   </TouchableOpacity>
                   <View style={styles.cardBody}>
                     <Text style={styles.cardTitle}>{item.title}</Text>
@@ -351,6 +370,21 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.6)",
   },
   deleteText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  editButton: {
+    position: "absolute",
+    top: 45,
+    right: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: "rgba(0,0,0,0.6)",
+  },
+
+  editText: {
     fontSize: 10,
     fontWeight: "700",
     color: "#fff",
