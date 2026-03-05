@@ -123,14 +123,14 @@ export default function WardrobeScreen() {
     );
   };
 
-  const handleEdit = (item: {
+  const handleViewDetail = (item: {
     id: string;
     title: string;
     category: string;
     image: string;
   }) => {
     router.push({
-      pathname: "/add-item",
+      pathname: "/detail-item",
       params: { id: item.id },
     });
   };
@@ -196,30 +196,44 @@ export default function WardrobeScreen() {
           {visibleItems.length ? (
             <View style={styles.grid}>
               {visibleItems.map((item) => (
-                <View key={item.id} style={styles.card}>
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.card}
+                  activeOpacity={0.9}
+                  onPress={() => handleViewDetail(item)}
+                >
                   <Image source={{ uri: item.image }} style={styles.cardImage} />
+
                   <TouchableOpacity
                     style={styles.deleteButton}
-                    onPress={() => handleDelete(item.id)}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDelete(item.id);
+                    }}
                     disabled={deletingId === item.id}
                   >
                     {deletingId === item.id ? (
-                      <ActivityIndicator color={theme.colors.text} size="small" />
+                      <ActivityIndicator color="#fff" size="small" />
                     ) : (
                       <Text style={styles.deleteText}>Delete</Text>
                     )}
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={styles.editButton}
-                    onPress={() => handleEdit(item)}
+                    style={styles.detailButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleViewDetail(item);
+                    }}
                   >
-                    <Text style={styles.editText}>Edit</Text>
+                    <Text style={styles.detailText}>Detail</Text>
                   </TouchableOpacity>
+
                   <View style={styles.cardBody}>
                     <Text style={styles.cardTitle}>{item.title}</Text>
                     <Text style={styles.cardSubtitle}>{item.category}</Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           ) : null}
@@ -374,7 +388,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#fff",
   },
-  editButton: {
+  detailButton: {
     position: "absolute",
     top: 45,
     right: 10,
@@ -382,11 +396,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: theme.radius.pill,
     backgroundColor: "rgba(0,0,0,0.6)",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-
-  editText: {
+  detailText: {
     fontSize: 10,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#fff",
   },
   cardBody: {

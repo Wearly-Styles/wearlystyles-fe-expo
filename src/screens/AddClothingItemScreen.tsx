@@ -50,31 +50,6 @@ export default function AddClothingItemScreen() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [loadingItem, setLoadingItem] = useState(false);
 
-
-  const {
-    id,
-    name: paramName,
-    image: paramImage,
-    categoryId: paramCategoryId,
-    color: paramColor,
-    material: paramMaterial,
-    description: paramDescription,
-    season: paramSeason,
-    isFavorite: paramIsFavorite,
-  } = useLocalSearchParams<{
-    id?: string;
-    name?: string;
-    image?: string;
-    categoryId?: string;
-    color?: string;
-    material?: string;
-    description?: string;
-    season?: string;
-    isFavorite?: string;
-  }>();
-
-  const isEditMode = Boolean(id);
-
   const canSubmit = useMemo(
     () => Boolean(image),
     [image],
@@ -104,57 +79,6 @@ export default function AddClothingItemScreen() {
       isActive = false;
     };
   }, []);
-
-  useEffect(() => {
-  if (!isEditMode || !id) return;
-
-  let isActive = true;
-
-  const loadItem = async () => {
-  try {
-    setLoadingItem(true);
-
-    console.log("CALLING API WITH ID:", id);
-
-    const response = await clothingApi.getItemById(Number(id));
-
-    console.log("RAW RESPONSE:", response);
-
-    setName(response.name || "");
-
-      setName(response.name || "");
-      setColor(response.color || "");
-      setMaterial(response.material || "");
-      setDescription(response.description || "");
-      setSeason(response.season || "All");
-      setIsFavorite(Boolean(response.isFavorite));
-      setSelectedCategoryId(response.categoryId || null);
-
-      if (response.image) {
-        setImage({
-          uri: response.image,
-          name: getFileNameFromUri(response.image),
-          type: "image/jpeg",
-        });
-      }
-    } catch (err: any) {
-  console.log("GET ITEM ERROR FULL:", err);
-  console.log("GET ITEM ERROR RESPONSE:", err?.response);
-  console.log("GET ITEM ERROR DATA:", err?.response?.data);
-  setError("Failed to load item.");
-} finally {
-      if (isActive) {
-        setLoadingItem(false);
-      }
-    }
-  };
-
-  loadItem();
-
-  return () => {
-    isActive = false;
-  };
-}, [isEditMode, id]);
 
   const handlePickImage = async () => {
     setError(null);
@@ -229,13 +153,8 @@ export default function AddClothingItemScreen() {
       if (season && season !== "All") form.append("season", season);
       form.append("isFavorite", String(isFavorite));
 
-      if (isEditMode && id) {
-        await clothingApi.updateItem(Number(id), form);
-        setSuccess("Item updated successfully.");
-      } else {
-        await clothingApi.createItem(form);
-        setSuccess("Item added to your wardrobe.");
-      }
+      await clothingApi.createItem(form);
+      setSuccess("Item added to your wardrobe.");
       router.replace("/wardrobe");
       setName("");
       setColor("");
