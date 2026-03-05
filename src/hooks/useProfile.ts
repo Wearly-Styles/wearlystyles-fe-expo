@@ -1,4 +1,3 @@
-//D:\wearlystyles-fe-expo\WearlyStyles\hooks\useProfile.ts
 import { useEffect, useState } from "react";
 import { getMyProfile } from "../services/profileApi";
 
@@ -10,18 +9,18 @@ export const useProfile = () => {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const res = await getMyProfile();
-      setProfile(res.data);
+      const data = await getMyProfile();
+      console.log("Fetched profile:", data); // <-- debug
+      setProfile(data);
     } catch (err: any) {
+      console.error("Error fetching profile:", err); // <-- debug
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
+  useEffect(() => { fetchProfile(); }, []);
 
   return { profile, loading, error, refetch: fetchProfile };
 };
