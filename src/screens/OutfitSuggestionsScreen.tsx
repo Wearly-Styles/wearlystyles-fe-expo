@@ -105,6 +105,8 @@ export default function OutfitSuggestionsScreen() {
   const [scheduledOutfits, setScheduledOutfits] = useState<
     Record<string, { planId: number; outfit: Outfit }>
   >({});
+  const [generatedOutfitsByDate, setGeneratedOutfitsByDate] = useState<Record<string, Outfit>>({});
+  const [savedOutfitIds, setSavedOutfitIds] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [requiresCloset, setRequiresCloset] = useState(false);
@@ -337,12 +339,87 @@ export default function OutfitSuggestionsScreen() {
     });
   };
 
-  const handleScheduleOutfit = async (
+  const extractClosetItemIds = (outfit: Outfit) =>
+    (outfit.items || [])
+      .map((item) => Number(String(item.id).split("-")[0]))
+      .filter((id) => Number.isFinite(id));
+
+  const ensureSavedOutfitId = async (outfit: Outfit) => {
+    const localId = String(outfit.id);
+    const cachedId = savedOutfitIds[localId];
+    if (cachedId) return cachedId;
+
+    const items = extractClosetItemIds(outfit);
+    if (items.length === 0) {
+      throw new Error("Please add closet items before scheduling.");
+    }
+
+    const created = await outfitApi.createOutfit({
+      name: outfit.title,
+      occasion: outfit.subtitle || undefined,
+      weather: outfit.weather || undefined,
+      items,
+    });
+
+    if (!created?.id) {
+      throw new Error("Save failed: missing outfit id.");
+    }
+
+    setSavedOutfitIds((prev) => ({ ...prev, [localId]: created.id }));
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      next.add(localId);
+      return next;
+    });
+
+    return created.id;
+  };
+
+  const scheduleOutfitForDate = async (
+    outfit: Outfit,
     dateKey: string,
     date: Date,
     existingPlanId?: number,
   ) => {
-    if (!editableOutfit) return;
+    const outfitId = await ensureSavedOutfitId(outfit);
+    const planType = outfit.mood || undefined;
+    const payload = {
+      outfitId,
+      planDate: date.toISOString(),
+      planType,
+    };
+
+    const plan = existingPlanId
+      ? await outfitPlanApi.updatePlan(existingPlanId, payload)
+      : (await outfitPlanApi.createPlans([payload]))[0];
+
+    if (!plan?.id) {
+      throw new Error("Failed to schedule outfit.");
+    }
+
+    const scheduled = {
+      ...outfit,
+      id: String(outfitId),
+    };
+
+    setScheduledOutfits((prev) => ({
+      ...prev,
+      [dateKey]: {
+        planId: plan.id,
+        outfit: scheduled,
+      },
+    }));
+    setOutfitCache([scheduled]);
+  };
+
+  const handleScheduleOutfit = async (
+    dateKey: string,
+    date: Date,
+    existingPlanId?: number,
+    outfitOverride?: Outfit,
+  ) => {
+    const outfit = outfitOverride ?? editableOutfit;
+    if (!outfit) return;
     if (!getAuthToken()) {
       setRequiresAuth(true);
       setError("Please sign in to schedule outfits.");
@@ -352,52 +429,172 @@ export default function OutfitSuggestionsScreen() {
     try {
       setLoading(true);
       setError(null);
-      const items = (editableOutfit.items || [])
-        .map((item) => Number(String(item.id).split("-")[0]))
-        .filter((id) => Number.isFinite(id));
-      if (items.length === 0) {
-        setError("Please add closet items before scheduling.");
-        return;
-      }
-
-      const created = await outfitApi.createOutfit({
-        name: editableOutfit.title,
-        occasion: editableOutfit.subtitle || undefined,
-        weather: editableOutfit.weather || undefined,
-        items,
-      });
-
-      const plan = existingPlanId
-        ? await outfitPlanApi.updatePlan(existingPlanId, {
-            outfitId: created.id,
-            planDate: date.toISOString(),
-          })
-        : (await outfitPlanApi.createPlans([
-            {
-              outfitId: created.id,
-              planDate: date.toISOString(),
-            },
-          ]))[0];
-      if (!plan?.id) {
-        throw new Error("Failed to schedule outfit.");
-      }
-      const scheduled = {
-        ...editableOutfit,
-        id: String(created.id),
-      };
-      setScheduledOutfits((prev) => ({
-        ...prev,
-        [dateKey]: {
-          planId: plan.id,
-          outfit: scheduled,
-        },
-      }));
-      setOutfitCache([scheduled]);
+      await scheduleOutfitForDate(outfit, dateKey, date, existingPlanId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to schedule outfit.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const scheduleGeneratedOutfits = async (replaceExisting: boolean) => {
+    const keys = Object.keys(generatedOutfitsByDate).sort();
+    if (keys.length === 0) {
+      setError("Generate outfits before scheduling.");
+      return;
+    }
+    if (!getAuthToken()) {
+      setRequiresAuth(true);
+      setError("Please sign in to schedule outfits.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const toCreate: Array<{
+        dateKey: string;
+        outfit: Outfit;
+        outfitId: number;
+        planDate: string;
+        planType?: string;
+      }> = [];
+      const toReplace: Array<{
+        dateKey: string;
+        planId: number;
+        outfit: Outfit;
+        outfitId: number;
+        planDate: string;
+        planType?: string;
+      }> = [];
+
+      for (const key of keys) {
+        const outfit = generatedOutfitsByDate[key];
+        if (!outfit) continue;
+        const date = parseDateKey(key);
+        if (!date) continue;
+
+        const outfitId = await ensureSavedOutfitId(outfit);
+        const planDate = date.toISOString();
+        const planType = outfit.mood || undefined;
+        const existing = scheduledOutfits[key];
+
+        if (existing) {
+          if (replaceExisting) {
+            toReplace.push({
+              dateKey: key,
+              planId: existing.planId,
+              outfit,
+              outfitId,
+              planDate,
+              planType,
+            });
+          }
+          continue;
+        }
+
+        toCreate.push({ dateKey: key, outfit, outfitId, planDate, planType });
+      }
+
+      const newEntries: Record<string, { planId: number; outfit: Outfit }> = {};
+
+      for (const entry of toReplace) {
+        const plan = await outfitPlanApi.updatePlan(entry.planId, {
+          outfitId: entry.outfitId,
+          planDate: entry.planDate,
+          planType: entry.planType,
+        });
+        if (!plan?.id) {
+          throw new Error("Failed to schedule outfit.");
+        }
+        const scheduled = { ...entry.outfit, id: String(entry.outfitId) };
+        newEntries[entry.dateKey] = { planId: plan.id, outfit: scheduled };
+      }
+
+      if (toCreate.length) {
+        const createdPlans = await outfitPlanApi.createPlans(
+          toCreate.map((item) => ({
+            outfitId: item.outfitId,
+            planDate: item.planDate,
+            planType: item.planType,
+          })),
+        );
+
+        const planIdByDateKey: Record<string, number> = {};
+        (createdPlans || []).forEach((plan) => {
+          planIdByDateKey[formatDateKey(new Date(plan.planDate))] = plan.id;
+        });
+
+        for (const item of toCreate) {
+          const planId = planIdByDateKey[item.dateKey];
+          if (!planId) continue;
+          const scheduled = { ...item.outfit, id: String(item.outfitId) };
+          newEntries[item.dateKey] = { planId, outfit: scheduled };
+        }
+      }
+
+      const entries = Object.values(newEntries);
+      if (!entries.length) {
+        showToast(
+          "error",
+          replaceExisting
+            ? "No outfits were scheduled. Try generating again."
+            : "All generated days are already scheduled.",
+        );
+        return;
+      }
+
+      setScheduledOutfits((prev) => ({ ...prev, ...newEntries }));
+      setOutfitCache(entries.map((entry) => entry.outfit));
+      showToast("success", `Scheduled ${entries.length} outfit(s).`);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to schedule outfits.";
+      setError(message);
+      showToast("error", message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScheduleGeneratedPress = () => {
+    const keys = Object.keys(generatedOutfitsByDate).sort();
+    if (keys.length === 0) {
+      setError("Generate outfits before scheduling.");
+      return;
+    }
+
+    const existingCount = keys.filter((key) => Boolean(scheduledOutfits[key]))
+      .length;
+    const total = keys.length;
+
+    if (existingCount === 0) {
+      Alert.alert(
+        "Schedule outfits",
+        `Schedule ${total} generated outfit(s) to your calendar? This will save them to your wardrobe.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Schedule", onPress: () => void scheduleGeneratedOutfits(false) },
+        ],
+        { cancelable: true },
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Schedule outfits",
+      `${existingCount} day(s) already have a scheduled outfit.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Skip existing",
+          onPress: () => void scheduleGeneratedOutfits(false),
+        },
+        { text: "Replace all", onPress: () => void scheduleGeneratedOutfits(true) },
+      ],
+      { cancelable: true },
+    );
   };
 
   const handleRemoveSchedule = async (dateKey: string, planId: number) => {
@@ -424,12 +621,27 @@ export default function OutfitSuggestionsScreen() {
 
   const handlePressCalendarDay = (dateKey: string, date: Date) => {
     const scheduled = scheduledOutfits[dateKey];
+    const suggested = generatedOutfitsByDate[dateKey];
     if (!scheduled) {
-      if (!editableOutfit) {
+      if (!editableOutfit && !suggested) {
         setError("Generate an outfit before scheduling.");
         return;
       }
-      void handleScheduleOutfit(dateKey, date);
+
+      const selectedForThisDate =
+        editableOutfit && String(editableOutfit.id).startsWith(`${dateKey}-`)
+          ? editableOutfit
+          : undefined;
+
+      const outfitToSchedule = suggested
+        ? selectedForThisDate ?? suggested
+        : editableOutfit ?? undefined;
+      if (!outfitToSchedule) {
+        setError("Generate an outfit before scheduling.");
+        return;
+      }
+
+      void handleScheduleOutfit(dateKey, date, undefined, outfitToSchedule);
       return;
     }
 
@@ -443,8 +655,14 @@ export default function OutfitSuggestionsScreen() {
         },
         {
           text: "Replace",
-          onPress: () =>
-            void handleScheduleOutfit(dateKey, date, scheduled.planId),
+          onPress: () => {
+            const replacement = editableOutfit ?? suggested ?? undefined;
+            if (!replacement) {
+              setError("Select an outfit before replacing.");
+              return;
+            }
+            void handleScheduleOutfit(dateKey, date, scheduled.planId, replacement);
+          },
         },
         {
           text: "Remove",
@@ -488,6 +706,9 @@ export default function OutfitSuggestionsScreen() {
     setGenerating(true);
     setError(null);
     try {
+      setApprovedIds(new Set());
+      setSavedOutfitIds({});
+      setGeneratedOutfitsByDate({});
       const closet = await contextApi.getCloset();
       if (!closet.length) {
         setRequiresCloset(true);
@@ -508,6 +729,7 @@ export default function OutfitSuggestionsScreen() {
         );
 
       const results: Outfit[] = [];
+      const suggestionsByDate: Record<string, Outfit> = {};
       for (const day of orderedDates) {
         const weather = await contextApi.getWeather({
           lat: 10.8231,
@@ -516,23 +738,32 @@ export default function OutfitSuggestionsScreen() {
         });
         const rec = await recommendationApi.recommendByContext({
           weather,
-          closet: closet.length ? closet : undefined,
+          closet,
         });
         const mapped = mapRecommendationsToOutfits(rec, closet, weather);
         if (mapped.length) {
+          const mappedWithIds = mapped.map((item) => ({
+            ...item,
+            id: `${day.key}-${item.id}`,
+          }));
           results.push(
-            ...mapped.map((item) => ({ ...item, id: `${day.key}-${item.id}` })),
+            ...mappedWithIds,
           );
+          suggestionsByDate[day.key] = mappedWithIds[0];
         }
       }
 
       setApiOutfits(results);
+      setGeneratedOutfitsByDate(suggestionsByDate);
       setClosetItems(closet);
       setOutfitCache(results);
       setActiveFilter(0);
       setRequiresAuth(false);
       setRequiresCloset(false);
-      setEditableOutfit(results[0] ?? null);
+      const firstKey = orderedDates[0]?.key;
+      setEditableOutfit(
+        firstKey ? suggestionsByDate[firstKey] ?? results[0] ?? null : results[0] ?? null,
+      );
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
         setRequiresAuth(true);
@@ -544,6 +775,7 @@ export default function OutfitSuggestionsScreen() {
         setError(err instanceof Error ? err.message : "Failed to generate");
       }
       setApiOutfits([]);
+      setGeneratedOutfitsByDate({});
     } finally {
       setGenerating(false);
     }
@@ -563,32 +795,11 @@ export default function OutfitSuggestionsScreen() {
       showToast("error", "Please sign in to approve outfits.");
       return;
     }
-    const items = (editableOutfit.items || [])
-      .map((item) => Number(String(item.id).split("-")[0]))
-      .filter((id) => Number.isFinite(id));
-    if (!items.length) {
-      showToast("error", "No closet items to save this outfit.");
-      return;
-    }
 
     setApproveLoading(true);
     try {
-      const saved = await outfitApi.createOutfit({
-        name: editableOutfit.title,
-        occasion: editableOutfit.subtitle || undefined,
-        weather: editableOutfit.weather || undefined,
-        items,
-      });
-      if (!saved?.id) {
-        showToast("error", "Save failed: missing outfit id.");
-        return;
-      }
-      setApprovedIds((prev) => {
-        const next = new Set(prev);
-        next.add(String(editableOutfit.id));
-        return next;
-      });
-      showToast("success", `Outfit saved (id=${saved.id}).`);
+      const savedId = await ensureSavedOutfitId(editableOutfit);
+      showToast("success", `Outfit saved (id=${savedId}).`);
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Failed to save outfit.");
     } finally {
@@ -649,12 +860,18 @@ export default function OutfitSuggestionsScreen() {
             {calendarDays.map((day) => {
               const events = eventsByDate[day.key] || [];
               const scheduled = scheduledOutfits[day.key];
+              const suggested = generatedOutfitsByDate[day.key];
+              const showSuggested = Boolean(suggested) && !scheduled;
               return (
                 <TouchableOpacity
                   key={day.key}
                   style={[
                     styles.calendarCard,
-                    scheduled ? styles.calendarCardActive : null,
+                    scheduled
+                      ? styles.calendarCardActive
+                      : showSuggested
+                        ? styles.calendarCardSuggested
+                        : null,
                   ]}
                   activeOpacity={0.85}
                   onPress={() => handlePressCalendarDay(day.key, day.date)}
@@ -677,6 +894,16 @@ export default function OutfitSuggestionsScreen() {
                       />
                       <Text style={styles.scheduledTitle} numberOfLines={1}>
                         {scheduled.outfit.title}
+                      </Text>
+                    </View>
+                  ) : showSuggested && suggested ? (
+                    <View style={styles.scheduledRow}>
+                      <Image
+                        source={{ uri: suggested.image }}
+                        style={styles.scheduledImage}
+                      />
+                      <Text style={styles.suggestedTitle} numberOfLines={1}>
+                        {suggested.title}
                       </Text>
                     </View>
                   ) : null}
@@ -742,10 +969,31 @@ export default function OutfitSuggestionsScreen() {
             )}
           </TouchableOpacity>
 
+          {Object.keys(generatedOutfitsByDate).length ? (
+            <TouchableOpacity
+              style={[
+                styles.scheduleButton,
+                (loading || generating) && styles.buttonDisabled,
+              ]}
+              onPress={handleScheduleGeneratedPress}
+              disabled={loading || generating}
+            >
+              {loading ? (
+                <ActivityIndicator color={theme.colors.text} />
+              ) : (
+                <Text style={styles.scheduleText}>
+                  Schedule {Object.keys(generatedOutfitsByDate).length} outfit(s)
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
+ 
           {loading || generating ? (
             <View style={styles.loadingRow}>
               <ActivityIndicator color={theme.colors.primaryDark} />
-              <Text style={styles.loadingText}>Loading recommendations...</Text>
+              <Text style={styles.loadingText}>
+                {generating ? "Loading recommendations..." : "Updating schedule..."}
+              </Text>
             </View>
           ) : error ? (
             <Text style={styles.errorText}>{error}</Text>
@@ -1003,10 +1251,25 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.pill,
     alignItems: "center",
   },
+  scheduleButton: {
+    marginTop: theme.spacing.sm,
+    marginHorizontal: theme.spacing.lg,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingVertical: 10,
+    borderRadius: theme.radius.pill,
+    alignItems: "center",
+  },
   buttonDisabled: {
     opacity: 0.55,
   },
   generateText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  scheduleText: {
     fontSize: 12,
     fontWeight: "700",
     color: theme.colors.text,
@@ -1079,6 +1342,11 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary,
     backgroundColor: theme.colors.card,
   },
+  calendarCardSuggested: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: theme.colors.border,
+  },
   calendarDay: {
     fontSize: 10,
     color: theme.colors.textSoft,
@@ -1120,6 +1388,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 10,
     color: theme.colors.textSoft,
+    fontWeight: "600",
+  },
+  suggestedTitle: {
+    flex: 1,
+    fontSize: 10,
+    color: theme.colors.textMuted,
     fontWeight: "600",
   },
   loadingRow: {
@@ -1347,6 +1621,7 @@ const styles = StyleSheet.create({
     gap: theme.spacing.md,
   },
   gridItem: {
-    width: "48%",
+    // Leave room for `grid.gap` so 2 columns don't wrap on small screens.
+    width: "46%",
   },
 });

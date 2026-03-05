@@ -20,7 +20,7 @@ export default function OutfitCard({ outfit, onPress, variant = "default" }: Out
       {previewItems.length ? (
         <View style={[styles.itemGrid, isCompact && styles.itemGridCompact]}>
           {previewItems.map((item) => (
-            <View key={item.id} style={styles.itemTile}>
+            <View key={item.id} style={[styles.itemTile, isCompact && styles.itemTileCompact]}>
               <Image source={{ uri: item.image }} style={styles.itemImage} />
               <Text style={styles.itemName} numberOfLines={1}>
                 {item.subtitle || item.title}
@@ -47,7 +47,11 @@ export default function OutfitCard({ outfit, onPress, variant = "default" }: Out
         <View style={[styles.tagRow, isCompact && styles.tagRowCompact]}>
           {outfit.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
             <View key={tag} style={[styles.tag, isCompact && styles.tagCompact]}>
-              <Text style={[styles.tagText, isCompact && styles.tagTextCompact]}>
+              <Text
+                style={[styles.tagText, isCompact && styles.tagTextCompact]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {tag}
               </Text>
             </View>
@@ -97,6 +101,10 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
     alignItems: "center",
   },
+  itemTileCompact: {
+    // Leave room for `itemGrid.gap` inside narrow (2-column) cards.
+    width: "46%",
+  },
   itemImage: {
     width: "100%",
     height: 80,
@@ -138,12 +146,15 @@ const styles = StyleSheet.create({
   },
   tagRowCompact: {
     marginTop: theme.spacing.sm,
+    flexWrap: "wrap",
   },
   tag: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.chip,
+    maxWidth: "100%",
+    flexShrink: 1,
   },
   tagCompact: {
     paddingHorizontal: 8,
