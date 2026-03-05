@@ -186,12 +186,50 @@ export default function OutfitSuggestionsScreen() {
     const today = new Date();
     setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1));
   };
-  const closetOptions = useMemo<OutfitItem[]>(() => {
-    if (closetItems.length) {
-      return closetItems.map(toOutfitItem);
+  const selectedSwapCategory = useMemo(() => {
+    if (!isEditing) return null;
+    const selectedItem = editableOutfit?.items?.[selectedSlot];
+    if (!selectedItem) return null;
+
+    const selectedId = Number(String(selectedItem.id).split("-")[0]);
+    if (!Number.isFinite(selectedId)) {
+      return selectedItem.title || null;
     }
-    return [];
-  }, [closetItems]);
+
+    const matched = closetItems.find((item) => item.id === selectedId);
+    return matched?.category || selectedItem.title || null;
+  }, [closetItems, editableOutfit, isEditing, selectedSlot]);
+
+  const swapOptions = useMemo<OutfitItem[]>(() => {
+    if (!closetItems.length) return [];
+    const all = closetItems.map(toOutfitItem);
+    if (!isEditing) return all;
+
+    const selectedItem = editableOutfit?.items?.[selectedSlot];
+    if (!selectedItem) return all;
+
+    const selectedId = Number(String(selectedItem.id).split("-")[0]);
+    if (!Number.isFinite(selectedId)) {
+      return all;
+    }
+
+    const matched = closetItems.find((item) => item.id === selectedId);
+    const matchedCategoryId = matched?.categoryId;
+
+    if (matchedCategoryId) {
+      return closetItems
+        .filter((item) => item.categoryId === matchedCategoryId)
+        .map(toOutfitItem);
+    }
+
+    const matchedCategory = (matched?.category || selectedItem.title || "").trim();
+    if (!matchedCategory) return all;
+
+    const normalized = matchedCategory.toLowerCase();
+    return closetItems
+      .filter((item) => (item.category || "").toLowerCase() === normalized)
+      .map(toOutfitItem);
+  }, [closetItems, editableOutfit, isEditing, selectedSlot]);
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, NormalizedEvent[]> = {};
@@ -1138,29 +1176,36 @@ export default function OutfitSuggestionsScreen() {
             </ScrollView>
           ) : null}
 
-          {isEditing && editableOutfit && closetOptions.length ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.swapRow}
-            >
-              {closetOptions.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.swapCard}
-                  activeOpacity={0.85}
-                  onPress={() => handleReplaceItem(item)}
-                >
-                  <Image
-                    source={{ uri: item.image }}
-                    style={styles.swapImage}
-                  />
-                  <Text style={styles.swapTitle} numberOfLines={1}>
-                    {item.subtitle}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          {isEditing && editableOutfit ? (
+            swapOptions.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.swapRow}
+              >
+                {swapOptions.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.swapCard}
+                    activeOpacity={0.85}
+                    onPress={() => handleReplaceItem(item)}
+                  >
+                    <Image source={{ uri: item.image }} style={styles.swapImage} />
+                    <Text style={styles.swapTitle} numberOfLines={1}>
+                      {item.subtitle}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.swapEmptyCard}>
+                <Text style={styles.swapEmptyText}>
+                  {selectedSwapCategory
+                    ? `No items found for ${selectedSwapCategory}.`
+                    : "No items available to swap."}
+                </Text>
+              </View>
+            )
           ) : null}
 
           {filteredOutfits.length ? (
@@ -1577,6 +1622,20 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.sm,
     paddingBottom: theme.spacing.md,
     gap: theme.spacing.sm,
+  },
+  swapEmptyCard: {
+    marginTop: theme.spacing.sm,
+    marginHorizontal: theme.spacing.lg,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  swapEmptyText: {
+    fontSize: 12,
+    color: theme.colors.textSoft,
+    textAlign: "center",
   },
   swapCard: {
     width: 90,
