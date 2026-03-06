@@ -19,6 +19,7 @@ import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
+import { ClothingItem } from "../services";
 
 export default function WardrobeScreen() {
   const router = useRouter();
@@ -122,6 +123,18 @@ export default function WardrobeScreen() {
     );
   };
 
+  const handleViewDetail = (item: {
+    id: string;
+    title: string;
+    category: string;
+    image: string;
+  }) => {
+    router.push({
+      pathname: "/detail-item",
+      params: { id: item.id },
+    });
+  };
+
   useEffect(() => loadCloset(), [loadCloset]);
 
   useFocusEffect(
@@ -183,24 +196,44 @@ export default function WardrobeScreen() {
           {visibleItems.length ? (
             <View style={styles.grid}>
               {visibleItems.map((item) => (
-                <View key={item.id} style={styles.card}>
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.card}
+                  activeOpacity={0.9}
+                  onPress={() => handleViewDetail(item)}
+                >
                   <Image source={{ uri: item.image }} style={styles.cardImage} />
+
                   <TouchableOpacity
                     style={styles.deleteButton}
-                    onPress={() => handleDelete(item.id)}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDelete(item.id);
+                    }}
                     disabled={deletingId === item.id}
                   >
                     {deletingId === item.id ? (
-                      <ActivityIndicator color={theme.colors.text} size="small" />
+                      <ActivityIndicator color="#fff" size="small" />
                     ) : (
                       <Text style={styles.deleteText}>Delete</Text>
                     )}
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.detailButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleViewDetail(item);
+                    }}
+                  >
+                    <Text style={styles.detailText}>Detail</Text>
+                  </TouchableOpacity>
+
                   <View style={styles.cardBody}>
                     <Text style={styles.cardTitle}>{item.title}</Text>
                     <Text style={styles.cardSubtitle}>{item.category}</Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           ) : null}
@@ -353,6 +386,24 @@ const styles = StyleSheet.create({
   deleteText: {
     fontSize: 10,
     fontWeight: "700",
+    color: "#fff",
+  },
+  detailButton: {
+    position: "absolute",
+    top: 45,
+    right: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  detailText: {
+    fontSize: 10,
+    fontWeight: "800",
     color: "#fff",
   },
   cardBody: {

@@ -17,6 +17,7 @@ import { theme } from "../constants/theme";
 import { clothingApi } from "../services/outfitApi";
 import { getAuthToken } from "../services/apiClient";
 import type { Category } from "../services/types";
+import { useLocalSearchParams } from "expo-router";
 
 type PickedImage = {
   uri: string;
@@ -47,6 +48,7 @@ export default function AddClothingItemScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
+  const [loadingItem, setLoadingItem] = useState(false);
 
   const canSubmit = useMemo(
     () => Boolean(image),
@@ -93,7 +95,7 @@ export default function AddClothingItemScreen() {
       mediaTypeEnum
         ? [mediaTypeEnum]
         : (ImagePicker as unknown as { MediaTypeOptions?: { Images?: string } })
-            .MediaTypeOptions?.Images;
+          .MediaTypeOptions?.Images;
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes,
