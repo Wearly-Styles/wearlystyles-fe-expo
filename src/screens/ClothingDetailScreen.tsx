@@ -169,10 +169,13 @@ const styles = StyleSheet.create({
         height: 340,
         backgroundColor: theme.colors.surface,
         position: 'relative',
+        justifyContent: "center",
+        alignItems: "center"
     },
     mainImage: { 
         width: '100%', 
-        height: '100%' 
+        height: '100%',
+        objectFit: 'contain',
     },
     placeholderImage: { 
         alignItems: 'center', 
