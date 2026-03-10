@@ -30,6 +30,7 @@ export type NormalizedEvent = {
 export type NormalizedClosetItem = {
   id: number;
   name?: string;
+  categoryId?: number | null;
   category?: string;
   color?: string;
   image?: string;
@@ -39,13 +40,24 @@ export type NormalizedClosetItem = {
   tags: string[];
 };
 
+export type MissingItem = {
+  name: string;
+  category?: string;
+  reason?: string;
+};
+
 export type OutfitRecommendation = {
+  outfit?: {
+    name?: string;
+    items?: NormalizedClosetItem[];
+  };
   eventId?: string;
   eventTitle?: string;
   eventType?: string;
   style?: string;
   items: number[];
   notes: string[];
+  missingItems?: MissingItem[];
 };
 
 export type RecommendationResponse = {

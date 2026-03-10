@@ -17,6 +17,11 @@ import { getAuthToken } from "../services/apiClient";
 import type { OutfitPlan } from "../services/types";
 import type { Outfit } from "../constants/mockOutfits";
 import { setOutfitCache } from "../utils/outfitStore";
+import {
+  addScheduleDays,
+  endOfScheduleDay,
+  startOfScheduleDay,
+} from "../utils/scheduleDate";
 
 const FALLBACK_IMAGE =
   "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80";
@@ -39,9 +44,8 @@ export default function OutfitPlansScreen() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const buildDateRange = () => {
-    const from = new Date();
-    const to = new Date(from);
-    to.setDate(from.getDate() + 14);
+    const from = startOfScheduleDay(new Date());
+    const to = endOfScheduleDay(addScheduleDays(from, 13));
     return { from: from.toISOString(), to: to.toISOString() };
   };
 

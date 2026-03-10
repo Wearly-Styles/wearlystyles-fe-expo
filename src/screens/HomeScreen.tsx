@@ -18,6 +18,13 @@ import { getAuthToken, isApiError } from "../services/apiClient";
 import { contextApi, recommendationApi, outfitPlanApi } from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
+import {
+  addScheduleDays,
+  atScheduleNoon,
+  endOfScheduleDay,
+  formatScheduleDateKey,
+  startOfScheduleDay,
+} from "../utils/scheduleDate";
 import type { Outfit } from "../constants/mockOutfits";
 import type { NormalizedWeather } from "../services/types";
 
@@ -28,10 +35,9 @@ const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const buildWeatherDays = (count = 7) => {
   const today = new Date();
   return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
+    const date = atScheduleNoon(addScheduleDays(today, index));
     return {
-      key: date.toISOString().slice(0, 10),
+      key: formatScheduleDateKey(date),
       label: DAY_LABELS[date.getDay()],
       dayNumber: date.getDate(),
       datetime: date.toISOString(),
@@ -142,16 +148,15 @@ export default function HomeScreen() {
           return;
         }
         try {
-          const from = new Date();
-          const to = new Date(from);
-          to.setDate(from.getDate() + 7);
+          const from = startOfScheduleDay(new Date());
+          const to = endOfScheduleDay(addScheduleDays(from, 6));
           const plans = await outfitPlanApi.listPlans(from.toISOString(), to.toISOString());
           if (!isActive) return;
           const map: Record<string, { title: string; outfitId: number }> = {};
           const outfitsToCache: Outfit[] = [];
           plans.forEach((plan) => {
             const title = plan.outfit?.name || `Outfit #${plan.outfitId}`;
-            const key = new Date(plan.planDate).toISOString().slice(0, 10);
+            const key = formatScheduleDateKey(new Date(plan.planDate));
             map[key] = {
               title,
               outfitId: plan.outfitId,

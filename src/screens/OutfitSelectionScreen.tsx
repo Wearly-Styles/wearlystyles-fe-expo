@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -41,19 +42,12 @@ const buildDateOptions = (count = 7) => {
 export default function OutfitSelectionScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [eventIndex, setEventIndex] = useState(0);
   const [styleIndex, setStyleIndex] = useState(0);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [closetCount, setClosetCount] = useState(0);
   const [weatherLoaded, setWeatherLoaded] = useState(false);
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const [requiresCloset, setRequiresCloset] = useState(false);
   const [approveLoading, setApproveLoading] = useState(false);
-  const [approveToast, setApproveToast] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const dateOptions = useMemo(() => buildDateOptions(7), []);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
@@ -61,6 +55,24 @@ export default function OutfitSelectionScreen() {
   const selectedEvent = EVENT_TYPES[eventIndex];
   const selectedStyle = STYLE_TYPES[styleIndex];
   const selectedDate = dateOptions[selectedDateIndex];
+
+  const showNotice = (title: string, message: string) => {
+    Alert.alert(title, message);
+  };
+
+  const showAuthRequired = (message: string) => {
+    Alert.alert("Sign in required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to login", onPress: () => router.replace("/login") },
+    ]);
+  };
+
+  const showClosetRequired = (message: string) => {
+    Alert.alert("Wardrobe required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
+    ]);
+  };
 
   const canGenerate = useMemo(
     () => !!selectedEvent && !!selectedStyle,
@@ -72,15 +84,12 @@ export default function OutfitSelectionScreen() {
     const preload = async () => {
       const token = getAuthToken();
       if (!token) {
-        setRequiresAuth(true);
         setClosetCount(0);
         return;
       }
       try {
         const closet = await contextApi.getCloset();
         if (!isActive) return;
-        setRequiresCloset(closet.length === 0);
-        setRequiresAuth(false);
         setClosetCount(closet.length);
       } catch {
         if (isActive) {
@@ -97,11 +106,9 @@ export default function OutfitSelectionScreen() {
   const handleGenerate = async () => {
     if (!canGenerate) return;
     setLoading(true);
-    setError(null);
     const token = getAuthToken();
     if (!token) {
-      setRequiresAuth(true);
-      setError("Please sign in to generate outfit suggestions.");
+      showAuthRequired("Please sign in to generate outfit suggestions.");
       setLoading(false);
       return;
     }
@@ -114,8 +121,7 @@ export default function OutfitSelectionScreen() {
       });
       const closet = await contextApi.getCloset();
       if (!closet.length) {
-        setRequiresCloset(true);
-        setError("Add items to your closet before generating outfits.");
+        showClosetRequired("Add items to your closet before generating outfits.");
         setLoading(false);
         return;
       }
@@ -129,17 +135,16 @@ export default function OutfitSelectionScreen() {
       setOutfits(mapped);
       setOutfitCache(mapped);
       setWeatherLoaded(true);
-      setRequiresAuth(false);
-      setRequiresCloset(false);
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
-        setRequiresAuth(true);
-        setError("Please sign in to generate outfit suggestions.");
+        showAuthRequired("Please sign in to generate outfit suggestions.");
       } else if (isApiError(err) && err.status === 400 && err.message.includes("Closet")) {
-        setRequiresCloset(true);
-        setError("Add items to your closet before generating outfits.");
+        showClosetRequired("Add items to your closet before generating outfits.");
       } else {
-        setError(err instanceof Error ? err.message : "Failed to generate outfit");
+        showNotice(
+          "Unable to generate outfit",
+          err instanceof Error ? err.message : "Failed to generate outfit",
+        );
       }
       setOutfits([]);
     } finally {
@@ -147,24 +152,16 @@ export default function OutfitSelectionScreen() {
     }
   };
 
-  const showToast = (type: "success" | "error", message: string) => {
-    setApproveToast({ type, message });
-    setTimeout(() => {
-      setApproveToast(null);
-    }, 2500);
-  };
-
   const handleApprove = async (outfit: Outfit) => {
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      showToast("error", "Please sign in to approve outfits.");
+      showAuthRequired("Please sign in to approve outfits.");
       return;
     }
     const items = (outfit.items || [])
       .map((item) => Number(String(item.id).split("-")[0]))
       .filter((id) => Number.isFinite(id));
     if (!items.length) {
-      showToast("error", "No closet items to save this outfit.");
+      showNotice("Unable to save outfit", "No closet items to save this outfit.");
       return;
     }
 
@@ -177,7 +174,7 @@ export default function OutfitSelectionScreen() {
         items,
       });
       if (!saved?.id) {
-        showToast("error", "Save failed: missing outfit id.");
+        showNotice("Unable to save outfit", "Save failed: missing outfit id.");
         return;
       }
       setApprovedIds((prev) => {
@@ -185,9 +182,12 @@ export default function OutfitSelectionScreen() {
         next.add(String(outfit.id));
         return next;
       });
-      showToast("success", `Outfit saved (id=${saved.id}).`);
+      showNotice("Outfit saved", `Outfit saved (id=${saved.id}).`);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "Failed to save outfit.");
+      showNotice(
+        "Unable to save outfit",
+        err instanceof Error ? err.message : "Failed to save outfit.",
+      );
     } finally {
       setApproveLoading(false);
     }
@@ -321,46 +321,6 @@ export default function OutfitSelectionScreen() {
               </Text>
             )}
           </TouchableOpacity>
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          {approveToast ? (
-            <View
-              style={[
-                styles.toast,
-                approveToast.type === "success"
-                  ? styles.toastSuccess
-                  : styles.toastError,
-              ]}
-            >
-              <Text style={styles.toastText}>{approveToast.message}</Text>
-            </View>
-          ) : null}
-          {requiresAuth ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Sign in to generate outfits based on your wardrobe.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.replace("/login")}
-              >
-                <Text style={styles.authButtonText}>Go to login</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          {requiresCloset ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Add items to your wardrobe to generate outfits.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.push("/wardrobe")}
-              >
-                <Text style={styles.authButtonText}>Go to wardrobe</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
 
           {outfits.length ? (
             <View style={styles.generatedSection}>
@@ -559,35 +519,11 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
-  errorText: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#C44536",
-  },
   emptyText: {
     paddingHorizontal: theme.spacing.lg,
     marginTop: theme.spacing.md,
     fontSize: 12,
     color: theme.colors.textSoft,
-  },
-  toast: {
-    marginHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
-  },
-  toastSuccess: {
-    backgroundColor: "#E7F6EC",
-  },
-  toastError: {
-    backgroundColor: "#FCE8E6",
-  },
-  toastText: {
-    fontSize: 12,
-    color: theme.colors.text,
-    fontWeight: "600",
   },
   grid: {
     marginTop: theme.spacing.sm,
@@ -606,31 +542,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   approveTextCompact: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: theme.colors.text,
-  },
-  authCard: {
-    marginTop: theme.spacing.md,
-    marginHorizontal: theme.spacing.lg,
-    padding: theme.spacing.md,
-    borderRadius: theme.radius.lg,
-    backgroundColor: theme.colors.surface,
-    alignItems: "center",
-  },
-  authText: {
-    fontSize: 12,
-    color: theme.colors.textSoft,
-    textAlign: "center",
-  },
-  authButton: {
-    marginTop: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 8,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.primary,
-  },
-  authButtonText: {
     fontSize: 11,
     fontWeight: "700",
     color: theme.colors.text,

@@ -70,6 +70,14 @@ const parseDateKey = (key: string) => {
   return new Date(year, month - 1, day, 12);
 };
 
+const getGeneratedDateKeyFromOutfitId = (outfitId: string) => {
+  const prefix = outfitId.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(prefix) && outfitId.charAt(10) === "-") {
+    return prefix;
+  }
+  return null;
+};
+
 const buildMonthDays = (monthDate: Date) => {
   const year = monthDate.getFullYear();
   const monthIndex = monthDate.getMonth();
@@ -107,14 +115,7 @@ export default function OutfitSuggestionsScreen() {
   >({});
   const [generatedOutfitsByDate, setGeneratedOutfitsByDate] = useState<Record<string, Outfit>>({});
   const [savedOutfitIds, setSavedOutfitIds] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const [requiresCloset, setRequiresCloset] = useState(false);
   const [approveLoading, setApproveLoading] = useState(false);
-  const [approveToast, setApproveToast] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
   const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const [activeFilter, setActiveFilter] = useState(0);
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
@@ -169,6 +170,24 @@ export default function OutfitSuggestionsScreen() {
     const label = MONTH_LABELS[calendarMonth.getMonth()];
     return `${label} ${calendarMonth.getFullYear()}`;
   }, [calendarMonth]);
+
+  const showNotice = (title: string, message: string) => {
+    Alert.alert(title, message);
+  };
+
+  const showAuthRequired = (message: string) => {
+    Alert.alert("Sign in required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to login", onPress: () => router.replace("/login") },
+    ]);
+  };
+
+  const showClosetRequired = (message: string) => {
+    Alert.alert("Wardrobe required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
+    ]);
+  };
 
   const handlePrevMonth = () => {
     setCalendarMonth(
@@ -338,19 +357,35 @@ export default function OutfitSuggestionsScreen() {
     }, [monthStart, monthEnd]),
   );
 
+  const updateEditableOutfit = (updater: (prev: Outfit) => Outfit) => {
+    setEditableOutfit((prev) => (prev ? updater(prev) : prev));
+  };
+
+  const syncEditedOutfit = (outfit: Outfit) => {
+    setApiOutfits((prev) => {
+      const updated = prev.map((item) =>
+        item.id === outfit.id ? outfit : item,
+      );
+      setOutfitCache(updated);
+      return updated;
+    });
+
+    const dateKey = getGeneratedDateKeyFromOutfitId(String(outfit.id));
+    if (!dateKey) return;
+
+    setGeneratedOutfitsByDate((prev) => {
+      if (!prev[dateKey]) return prev;
+      return {
+        ...prev,
+        [dateKey]: outfit,
+      };
+    });
+  };
+
   const handleToggleEdit = () => {
     if (!editableOutfit) return;
     if (isEditing) {
-      setApiOutfits((prev) => {
-        const updated =
-          prev.length === 0
-            ? [editableOutfit]
-            : prev.map((outfit, index) =>
-                index === 0 ? editableOutfit : outfit
-              );
-        setOutfitCache(updated);
-        return updated;
-      });
+      syncEditedOutfit(editableOutfit);
       setIsEditing(false);
       return;
     }
@@ -359,8 +394,7 @@ export default function OutfitSuggestionsScreen() {
   };
 
   const handleReplaceItem = (replacement: OutfitItem) => {
-    setEditableOutfit((prev) => {
-      if (!prev) return prev;
+    updateEditableOutfit((prev) => {
       const items = [...prev.items];
       if (!items.length) {
         items.push({
@@ -459,17 +493,18 @@ export default function OutfitSuggestionsScreen() {
     const outfit = outfitOverride ?? editableOutfit;
     if (!outfit) return;
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to schedule outfits.");
+      showAuthRequired("Please sign in to schedule outfits.");
       return;
     }
 
     try {
       setLoading(true);
-      setError(null);
       await scheduleOutfitForDate(outfit, dateKey, date, existingPlanId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to schedule outfit.");
+      showNotice(
+        "Unable to schedule outfit",
+        err instanceof Error ? err.message : "Failed to schedule outfit.",
+      );
     } finally {
       setLoading(false);
     }
@@ -478,18 +513,16 @@ export default function OutfitSuggestionsScreen() {
   const scheduleGeneratedOutfits = async (replaceExisting: boolean) => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      setError("Generate outfits before scheduling.");
+      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
       return;
     }
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to schedule outfits.");
+      showAuthRequired("Please sign in to schedule outfits.");
       return;
     }
 
     try {
       setLoading(true);
-      setError(null);
 
       const toCreate: Array<{
         dateKey: string;
@@ -574,8 +607,8 @@ export default function OutfitSuggestionsScreen() {
 
       const entries = Object.values(newEntries);
       if (!entries.length) {
-        showToast(
-          "error",
+        showNotice(
+          "Nothing changed",
           replaceExisting
             ? "No outfits were scheduled. Try generating again."
             : "All generated days are already scheduled.",
@@ -585,12 +618,11 @@ export default function OutfitSuggestionsScreen() {
 
       setScheduledOutfits((prev) => ({ ...prev, ...newEntries }));
       setOutfitCache(entries.map((entry) => entry.outfit));
-      showToast("success", `Scheduled ${entries.length} outfit(s).`);
+      showNotice("Schedule updated", `Scheduled ${entries.length} outfit(s).`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to schedule outfits.";
-      setError(message);
-      showToast("error", message);
+      showNotice("Unable to schedule outfits", message);
     } finally {
       setLoading(false);
     }
@@ -599,7 +631,7 @@ export default function OutfitSuggestionsScreen() {
   const handleScheduleGeneratedPress = () => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      setError("Generate outfits before scheduling.");
+      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
       return;
     }
 
@@ -637,13 +669,11 @@ export default function OutfitSuggestionsScreen() {
 
   const handleRemoveSchedule = async (dateKey: string, planId: number) => {
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to manage your schedule.");
+      showAuthRequired("Please sign in to manage your schedule.");
       return;
     }
     try {
       setLoading(true);
-      setError(null);
       await outfitPlanApi.deletePlan(planId);
       setScheduledOutfits((prev) => {
         const next = { ...prev };
@@ -651,7 +681,10 @@ export default function OutfitSuggestionsScreen() {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove scheduled outfit.");
+      showNotice(
+        "Unable to remove scheduled outfit",
+        err instanceof Error ? err.message : "Failed to remove scheduled outfit.",
+      );
     } finally {
       setLoading(false);
     }
@@ -662,7 +695,7 @@ export default function OutfitSuggestionsScreen() {
     const suggested = generatedOutfitsByDate[dateKey];
     if (!scheduled) {
       if (!editableOutfit && !suggested) {
-        setError("Generate an outfit before scheduling.");
+        showNotice("No outfit selected", "Generate an outfit before scheduling.");
         return;
       }
 
@@ -675,7 +708,7 @@ export default function OutfitSuggestionsScreen() {
         ? selectedForThisDate ?? suggested
         : editableOutfit ?? undefined;
       if (!outfitToSchedule) {
-        setError("Generate an outfit before scheduling.");
+        showNotice("No outfit selected", "Generate an outfit before scheduling.");
         return;
       }
 
@@ -696,7 +729,7 @@ export default function OutfitSuggestionsScreen() {
           onPress: () => {
             const replacement = editableOutfit ?? suggested ?? undefined;
             if (!replacement) {
-              setError("Select an outfit before replacing.");
+              showNotice("No outfit selected", "Select an outfit before replacing.");
               return;
             }
             void handleScheduleOutfit(dateKey, date, scheduled.planId, replacement);
@@ -733,24 +766,21 @@ export default function OutfitSuggestionsScreen() {
   const handleGenerate = async () => {
     const token = getAuthToken();
     if (!token) {
-      setRequiresAuth(true);
-      setError("Please sign in to load outfit recommendations.");
+      showAuthRequired("Please sign in to load outfit recommendations.");
       return;
     }
     if (selectedDates.size === 0) {
-      setError("Select at least one day to generate outfits.");
+      showNotice("Select a day", "Select at least one day to generate outfits.");
       return;
     }
     setGenerating(true);
-    setError(null);
     try {
       setApprovedIds(new Set());
       setSavedOutfitIds({});
       setGeneratedOutfitsByDate({});
       const closet = await contextApi.getCloset();
       if (!closet.length) {
-        setRequiresCloset(true);
-        setError("Add items to your closet to unlock suggestions.");
+        showClosetRequired("Add items to your closet to unlock suggestions.");
         setGenerating(false);
         return;
       }
@@ -796,21 +826,20 @@ export default function OutfitSuggestionsScreen() {
       setClosetItems(closet);
       setOutfitCache(results);
       setActiveFilter(0);
-      setRequiresAuth(false);
-      setRequiresCloset(false);
       const firstKey = orderedDates[0]?.key;
       setEditableOutfit(
         firstKey ? suggestionsByDate[firstKey] ?? results[0] ?? null : results[0] ?? null,
       );
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
-        setRequiresAuth(true);
-        setError("Please sign in to load outfit recommendations.");
+        showAuthRequired("Please sign in to load outfit recommendations.");
       } else if (isApiError(err) && err.status === 400 && err.message.includes("Closet")) {
-        setRequiresCloset(true);
-        setError("Add items to your closet to unlock suggestions.");
+        showClosetRequired("Add items to your closet to unlock suggestions.");
       } else {
-        setError(err instanceof Error ? err.message : "Failed to generate");
+        showNotice(
+          "Unable to generate outfits",
+          err instanceof Error ? err.message : "Failed to generate",
+        );
       }
       setApiOutfits([]);
       setGeneratedOutfitsByDate({});
@@ -819,27 +848,22 @@ export default function OutfitSuggestionsScreen() {
     }
   };
 
-  const showToast = (type: "success" | "error", message: string) => {
-    setApproveToast({ type, message });
-    setTimeout(() => {
-      setApproveToast(null);
-    }, 2500);
-  };
-
   const handleApprove = async () => {
     if (!editableOutfit) return;
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      showToast("error", "Please sign in to approve outfits.");
+      showAuthRequired("Please sign in to approve outfits.");
       return;
     }
 
     setApproveLoading(true);
     try {
       const savedId = await ensureSavedOutfitId(editableOutfit);
-      showToast("success", `Outfit saved (id=${savedId}).`);
+      showNotice("Outfit saved", `Outfit saved (id=${savedId}).`);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "Failed to save outfit.");
+      showNotice(
+        "Unable to save outfit",
+        err instanceof Error ? err.message : "Failed to save outfit.",
+      );
     } finally {
       setApproveLoading(false);
     }
@@ -1033,46 +1057,6 @@ export default function OutfitSuggestionsScreen() {
                 {generating ? "Loading recommendations..." : "Updating schedule..."}
               </Text>
             </View>
-          ) : error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : null}
-          {approveToast ? (
-            <View
-              style={[
-                styles.toast,
-                approveToast.type === "success"
-                  ? styles.toastSuccess
-                  : styles.toastError,
-              ]}
-            >
-              <Text style={styles.toastText}>{approveToast.message}</Text>
-            </View>
-          ) : null}
-          {requiresAuth ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Sign in to see personalized outfit suggestions.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.replace("/login")}
-              >
-                <Text style={styles.authButtonText}>Go to login</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          {requiresCloset ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Add items to your wardrobe to get personalized suggestions.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.push("/wardrobe")}
-              >
-                <Text style={styles.authButtonText}>Go to wardrobe</Text>
-              </TouchableOpacity>
-            </View>
           ) : null}
 
           {editableOutfit ? (
@@ -1097,9 +1081,6 @@ export default function OutfitSuggestionsScreen() {
               )}
             </TouchableOpacity>
           ) : null}
-          {editableOutfit && approvedIds.has(String(editableOutfit.id)) ? (
-            <Text style={styles.successText}>Outfit approved.</Text>
-          ) : null}
 
           {editableOutfit ? (
             <View style={styles.editHeader}>
@@ -1119,7 +1100,7 @@ export default function OutfitSuggestionsScreen() {
                 style={styles.editInput}
                 value={editableOutfit.title}
                 onChangeText={(text) =>
-                  setEditableOutfit((prev) => ({ ...prev, title: text }))
+                  updateEditableOutfit((prev) => ({ ...prev, title: text }))
                 }
               />
               <Text style={styles.editLabel}>Short note</Text>
@@ -1127,7 +1108,7 @@ export default function OutfitSuggestionsScreen() {
                 style={styles.editInput}
                 value={editableOutfit.subtitle}
                 onChangeText={(text) =>
-                  setEditableOutfit((prev) => ({ ...prev, subtitle: text }))
+                  updateEditableOutfit((prev) => ({ ...prev, subtitle: text }))
                 }
               />
               <Text style={styles.editHint}>
@@ -1452,41 +1433,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.colors.textSoft,
   },
-  errorText: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#C44536",
-  },
   emptyText: {
     paddingHorizontal: theme.spacing.lg,
     marginTop: theme.spacing.md,
     fontSize: 12,
     color: theme.colors.textSoft,
-  },
-  successText: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#2E7D32",
-  },
-  toast: {
-    marginHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
-  },
-  toastSuccess: {
-    backgroundColor: "#E7F6EC",
-  },
-  toastError: {
-    backgroundColor: "#FCE8E6",
-  },
-  toastText: {
-    fontSize: 12,
-    color: theme.colors.text,
-    fontWeight: "600",
   },
   approveButton: {
     marginTop: theme.spacing.sm,
@@ -1498,31 +1449,6 @@ const styles = StyleSheet.create({
   },
   approveText: {
     fontSize: 12,
-    fontWeight: "700",
-    color: theme.colors.text,
-  },
-  authCard: {
-    marginTop: theme.spacing.md,
-    marginHorizontal: theme.spacing.lg,
-    padding: theme.spacing.md,
-    borderRadius: theme.radius.lg,
-    backgroundColor: theme.colors.surface,
-    alignItems: "center",
-  },
-  authText: {
-    fontSize: 12,
-    color: theme.colors.textSoft,
-    textAlign: "center",
-  },
-  authButton: {
-    marginTop: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 8,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.primary,
-  },
-  authButtonText: {
-    fontSize: 11,
     fontWeight: "700",
     color: theme.colors.text,
   },
