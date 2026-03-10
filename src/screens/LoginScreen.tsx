@@ -194,7 +194,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <View style={styles.linkRow}>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push("/reset-password" as any)} disabled={loading}>
                 <Text style={styles.linkText}>Forgot password?</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => router.replace("/(tabs)")} disabled={loading}>
