@@ -11,18 +11,28 @@ export const requestForgotPassword = async (email: string) => {
   });
 };
 
-export const resetPasswordApi = async (data: { token: string; newPassword: string }) => {
-  // data.token ở đây chính là mã OTP 6 số đã nối lại từ FE
+export const verifyOtpApi = async (data: { email: string; otp: string }) => {
+  return request("/mobile/auth/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({
+      email: data.email,
+      otp: data.otp,
+    }),
+    skipAuth: true,
+  });
+};
+
+export const resetPasswordApi = async (data: { email: string; newPassword: string }) => {
+
   const result = await request("/mobile/auth/reset-password", {
     method: "POST",
     body: JSON.stringify({
-      token: data.token,
+      email: data.email,
       newPassword: data.newPassword,
     }),
     skipAuth: true,
   });
 
-  // Sau khi reset thành công, xóa token cũ để bắt đăng nhập lại
   await setStoredToken(null);
   await setStoredRefreshToken(null);
 

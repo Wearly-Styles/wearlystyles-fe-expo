@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router'; // Đảm bảo chuyển trang chính xác
+import { useRouter } from 'expo-router';
+import { Platform } from 'react-native';
 
 import EmailForm from '../components/ResetPasswordForm/EmailForm';
 import OTPForm from '../components/ResetPasswordForm/OTPForm';
 import SuccessForm from '../components/ResetPasswordForm/SuccessForm';
 import NewPasswordForm from '../components/ResetPasswordForm/NewPasswordForm';
 
-import { requestForgotPassword, resetPasswordApi } from '../services/forgotPasswordApi';
+import { requestForgotPassword, verifyOtpApi, resetPasswordApi } from '../services/forgotPasswordApi';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -34,15 +35,28 @@ export default function ResetPasswordScreen() {
 
   const handleVerifyOtp = async (otpValue: string) => {
     if (otpValue.length < 6) {
-      return Alert.alert("Failed", "Please enter the 6-digit OTP code sent to your email.");
+      const msg = "Please enter the 6-digit OTP code sent to your email.";
+      return Platform.OS === 'web' ? alert(msg) : Alert.alert("Failed", msg);
     }
 
     setLoading(true);
     try {
+      // 2. Gọi API để verify mã OTP
+      // Bạn cần truyền cả email và mã otp lên để server tìm đúng user
+      await verifyOtpApi({ email: email, otp: otpValue });
+
+      // 3. Nếu thành công: Lưu mã otp lại và chuyển sang bước tiếp theo
       setOtp(otpValue);
       setStep(3);
     } catch (error: any) {
-      Alert.alert("Failed", "The OTP code is incorrect. Please try again.");
+      // 4. Nếu thất bại (Mã sai, hết hạn, hoặc email không tồn tại)
+      const serverMsg = error.response?.data?.message || "The OTP code is incorrect or has expired.";
+
+      if (Platform.OS === 'web') {
+        alert("Verification Failed: " + serverMsg);
+      } else {
+        Alert.alert("Failed", serverMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -53,7 +67,7 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     try {
       await resetPasswordApi({
-        token: otp,
+        email: email,
         newPassword
       });
 
@@ -63,7 +77,7 @@ export default function ResetPasswordScreen() {
         [
           {
             text: "Go to Login",
-            onPress: () => router.replace('/login') 
+            onPress: () => router.replace('/login')
           }
         ],
         { cancelable: false }
@@ -102,6 +116,7 @@ const styles = StyleSheet.create({
   backButton: {
     width: 40,
     height: 40,
+    marginTop: 50,
     borderRadius: 20,
     backgroundColor: '#F5F5F5',
     justifyContent: 'center',
