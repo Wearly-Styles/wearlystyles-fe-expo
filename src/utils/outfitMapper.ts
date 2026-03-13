@@ -218,6 +218,57 @@ const toOutfitItem = (item: NormalizedClosetItem, index: number): OutfitItem => 
   image: item.image || FALLBACK_IMAGE,
 });
 
+const normalizeOutfitItemId = (value: string) => {
+  const numericId = Number(value.split("-")[0]);
+  return Number.isFinite(numericId) ? String(numericId) : null;
+};
+
+const buildOutfitSignature = (outfit: Outfit) => {
+  const normalizedItemIds = Array.from(
+    new Set(
+      outfit.items
+        .map((item) => normalizeOutfitItemId(item.id))
+        .filter((itemId): itemId is string => Boolean(itemId)),
+    ),
+  ).sort();
+
+  if (normalizedItemIds.length > 0) {
+    return `items:${normalizedItemIds.join(",")}`;
+  }
+
+  const fallbackSignature = outfit.items
+    .map((item) =>
+      [normalizeText(item.title), normalizeText(item.subtitle)].join(":"),
+    )
+    .filter(Boolean)
+    .sort()
+    .join("|");
+
+  if (fallbackSignature) {
+    return `text:${fallbackSignature}`;
+  }
+
+  return [
+    normalizeText(outfit.title),
+    normalizeText(outfit.subtitle),
+    normalizeText(outfit.mood),
+  ].join("|");
+};
+
+const dedupeOutfits = (outfits: Outfit[]) => {
+  const seen = new Set<string>();
+  const unique: Outfit[] = [];
+
+  outfits.forEach((outfit) => {
+    const signature = buildOutfitSignature(outfit);
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    unique.push(outfit);
+  });
+
+  return unique;
+};
+
 const scoreFallbackItem = (item: NormalizedClosetItem) => {
   let score = 0;
   if (item.isFavorite) score += 3;
@@ -390,7 +441,9 @@ export const mapRecommendationsToOutfits = (
       ? recommended
       : [response.primary, ...(response.alternatives || [])].filter(Boolean);
 
-  return all.map((rec, index) => mapRecommendation(rec, closet, weather, index));
+  return dedupeOutfits(
+    all.map((rec, index) => mapRecommendation(rec, closet, weather, index)),
+  );
 };
 
 export const mapClosetToWardrobe = (

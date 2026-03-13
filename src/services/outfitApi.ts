@@ -4,6 +4,7 @@ import type {
   NormalizedClosetItem,
   NormalizedEvent,
   RecommendationResponse,
+  RecommendationPriorOutfit,
   User,
   AuthPayload,
   Category,
@@ -11,6 +12,7 @@ import type {
   ClothingItem,
   OutfitEntity,
   OutfitPlan,
+  OutfitHistoryEntity,
 } from "./types";
 
 type WeatherQuery = {
@@ -45,6 +47,8 @@ export const recommendationApi = {
     calendar?: NormalizedEvent[];
     closet: NormalizedClosetItem[];
     preferences?: string[];
+    planDate?: string;
+    recentOutfits?: RecommendationPriorOutfit[];
   }) =>
     request<RecommendationResponse>("/mobile/recommendations/by-context", {
       method: "POST",
@@ -56,6 +60,8 @@ export const recommendationApi = {
     closet: NormalizedClosetItem[];
     weather?: NormalizedWeather;
     calendar?: NormalizedEvent[];
+    planDate?: string;
+    recentOutfits?: RecommendationPriorOutfit[];
   }) =>
     request<RecommendationResponse>("/mobile/recommendations/by-selection", {
       method: "POST",
@@ -137,6 +143,10 @@ export const clothingApi = {
 };
 
 export const outfitApi = {
+  listOutfits: () =>
+    request<OutfitEntity[]>("/mobile/outfits"),
+  countOutfits: () =>
+    request<{ count: number }>("/mobile/outfits/count"),
   createOutfit: (payload: {
     name?: string;
     occasion?: string;
@@ -147,6 +157,26 @@ export const outfitApi = {
     request<OutfitEntity>("/mobile/outfits", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  getOutfitById: (id: number) =>
+    request<OutfitEntity>(`/mobile/outfits/${id}`),
+  updateOutfit: (
+    id: number,
+    payload: {
+      name?: string;
+      occasion?: string;
+      weather?: string;
+      isFavorite?: boolean;
+      items?: number[];
+    },
+  ) =>
+    request<OutfitEntity>(`/mobile/outfits/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteOutfit: (id: number) =>
+    request<{ id: number }>(`/mobile/outfits/${id}`, {
+      method: "DELETE",
     }),
 };
 
@@ -185,4 +215,19 @@ export const outfitPlanApi = {
     request<{ id: number }>(`/mobile/outfit-plans/${id}`, {
       method: "DELETE",
     }),
+};
+
+export const outfitHistoryApi = {
+  wearToday: (payload: { outfitId: number; note?: string }) =>
+    request<OutfitHistoryEntity>("/mobile/outfit-histories/wear-today", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listHistories: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<OutfitHistoryEntity[]>(`/mobile/outfit-histories${suffix}`);
+  },
 };

@@ -1,63 +1,123 @@
-import { View, Text, Image, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { theme } from "../constants/theme";
 import type { Outfit } from "../constants/mockOutfits";
+import OutfitCanvas from "./OutfitCanvas";
 
 type OutfitCardProps = {
   outfit: Outfit;
   onPress?: () => void;
-  variant?: "default" | "compact";
+  variant?: "default" | "compact" | "detail";
+};
+
+const normalizeText = (value?: string | null) =>
+  (value || "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const toTitleCase = (value: string) =>
+  value.replace(/\w\S*/g, (chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1));
+
+const normalizeCompare = (value?: string | null) => normalizeText(value).toLowerCase();
+
+const isMeaningfulMeta = (value?: string | null) => {
+  const normalized = normalizeCompare(value);
+  return Boolean(
+    normalized &&
+      normalized !== "general" &&
+      normalized !== "saved outfit" &&
+      normalized !== "scheduled" &&
+      normalized !== "weather unavailable",
+  );
+};
+
+const dedupeWords = (value: string) => {
+  const words = value.split(" ").filter(Boolean);
+  return words.filter((word, index) => {
+    const previous = words[index - 1];
+    return !previous || previous.toLowerCase() !== word.toLowerCase();
+  });
+};
+
+const getCardHeadline = (outfit: Outfit) => {
+  const title = normalizeText(outfit.title);
+  if (title && isMeaningfulMeta(title)) {
+    return toTitleCase(dedupeWords(title).join(" "));
+  }
+
+  const preferred = [outfit.tags?.[0], outfit.subtitle, outfit.mood].find((value) =>
+    isMeaningfulMeta(value),
+  );
+  if (preferred) {
+    return toTitleCase(normalizeText(preferred));
+  }
+
+  const fallback = dedupeWords(title || "Styled outfit").join(" ");
+  return fallback || "Styled outfit";
+};
+
+const getCardDescription = (outfit: Outfit) => {
+  const title = normalizeCompare(outfit.title);
+  const candidates = [outfit.subtitle, outfit.mood, outfit.weather];
+
+  const description = candidates.find((value) => {
+    if (!isMeaningfulMeta(value)) return false;
+    return normalizeCompare(value) !== title;
+  });
+
+  return description ? normalizeText(description) : null;
 };
 
 export default function OutfitCard({ outfit, onPress, variant = "default" }: OutfitCardProps) {
   const isCompact = variant === "compact";
-  const previewItems = outfit.items?.slice(0, isCompact ? 2 : 4) ?? [];
+  const isDetail = variant === "detail";
+  const displayTitle = getCardHeadline(outfit);
+  const description = getCardDescription(outfit);
+
   return (
     <TouchableOpacity
-      style={[styles.card, isCompact && styles.cardCompact]}
+      style={[
+        styles.card,
+        isCompact && styles.cardCompact,
+        isDetail && styles.cardDetail,
+      ]}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={onPress ? 0.8 : 1}
+      disabled={!onPress}
     >
-      {previewItems.length ? (
-        <View style={[styles.itemGrid, isCompact && styles.itemGridCompact]}>
-          {previewItems.map((item) => (
-            <View key={item.id} style={[styles.itemTile, isCompact && styles.itemTileCompact]}>
-              <Image source={{ uri: item.image }} style={styles.itemImage} />
-              <Text style={styles.itemName} numberOfLines={1}>
-                {item.subtitle || item.title}
-              </Text>
-            </View>
-          ))}
+      <OutfitCanvas
+        outfit={outfit}
+        variant={isCompact ? "compact" : isDetail ? "detail" : "default"}
+      />
+      {!isCompact ? (
+        <View style={[styles.content, isDetail && styles.contentDetail]}>
+          <Text
+            style={[styles.title, isDetail && styles.titleDetail]}
+            numberOfLines={isDetail ? 2 : 1}
+          >
+            {displayTitle}
+          </Text>
+          {description ? (
+            <Text
+              style={[styles.description, isDetail && styles.descriptionDetail]}
+              numberOfLines={isDetail ? undefined : 2}
+            >
+              {description}
+            </Text>
+          ) : null}
         </View>
       ) : (
-        <Image
-          source={{ uri: outfit.image }}
-          style={[styles.image, isCompact && styles.imageCompact]}
-        />
-      )}
-      <View style={[styles.content, isCompact && styles.contentCompact]}>
-        <Text style={[styles.title, isCompact && styles.titleCompact]} numberOfLines={1}>
-          {outfit.title}
-        </Text>
-        <Text
-          style={[styles.subtitle, isCompact && styles.subtitleCompact]}
-          numberOfLines={1}
-        >
-          {outfit.subtitle}
-        </Text>
-        <View style={[styles.tagRow, isCompact && styles.tagRowCompact]}>
-          {outfit.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
-            <View key={tag} style={[styles.tag, isCompact && styles.tagCompact]}>
-              <Text
-                style={[styles.tagText, isCompact && styles.tagTextCompact]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {tag}
-              </Text>
-            </View>
-          ))}
+        <View style={[styles.content, styles.contentCompact]}>
+          <Text style={[styles.title, styles.titleCompact]} numberOfLines={2}>
+            {displayTitle}
+          </Text>
+          {description ? (
+            <Text style={[styles.description, styles.descriptionCompact]} numberOfLines={2}>
+              {description}
+            </Text>
+          ) : null}
         </View>
-      </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -65,107 +125,67 @@ export default function OutfitCard({ outfit, onPress, variant = "default" }: Out
 const styles = StyleSheet.create({
   card: {
     marginTop: theme.spacing.md,
-    borderRadius: theme.radius.xl,
-    backgroundColor: theme.colors.card,
+    borderRadius: 30,
+    backgroundColor: "#FFFCF8",
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#E4D5C5",
     shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
   cardCompact: {
     marginTop: 0,
-    borderRadius: theme.radius.lg,
+    borderRadius: 22,
   },
-  image: {
-    height: 260,
-    width: "100%",
-  },
-  imageCompact: {
-    height: 140,
-  },
-  itemGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  itemGridCompact: {
-    padding: theme.spacing.sm,
-  },
-  itemTile: {
-    width: "47%",
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface,
-    padding: theme.spacing.sm,
-    alignItems: "center",
-  },
-  itemTileCompact: {
-    // Leave room for `itemGrid.gap` inside narrow (2-column) cards.
-    width: "46%",
-  },
-  itemImage: {
-    width: "100%",
-    height: 80,
-    borderRadius: theme.radius.sm,
-  },
-  itemName: {
-    marginTop: 6,
-    fontSize: 10,
-    color: theme.colors.textSoft,
-    textAlign: "center",
+  cardDetail: {
+    marginTop: 0,
+    borderRadius: 32,
   },
   content: {
-    padding: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: 14,
+    paddingBottom: 18,
+  },
+  contentDetail: {
+    paddingTop: 16,
+    paddingBottom: 20,
   },
   contentCompact: {
-    padding: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   title: {
     fontSize: 18,
     fontWeight: "700",
-    color: theme.colors.text,
+    lineHeight: 22,
+    color: "#1D1712",
+  },
+  titleDetail: {
+    fontSize: 20,
+    lineHeight: 25,
   },
   titleCompact: {
     fontSize: 13,
+    lineHeight: 16,
   },
-  subtitle: {
+  description: {
     marginTop: 6,
     fontSize: 12,
+    lineHeight: 18,
     color: theme.colors.textMuted,
   },
-  subtitleCompact: {
+  descriptionDetail: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  descriptionCompact: {
     marginTop: 4,
     fontSize: 10,
-  },
-  tagRow: {
-    flexDirection: "row",
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  tagRowCompact: {
-    marginTop: theme.spacing.sm,
-    flexWrap: "wrap",
-  },
-  tag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.chip,
-    maxWidth: "100%",
-    flexShrink: 1,
-  },
-  tagCompact: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagText: {
-    fontSize: 10,
-    color: theme.colors.textSoft,
-    fontWeight: "600",
-  },
-  tagTextCompact: {
-    fontSize: 9,
+    lineHeight: 14,
   },
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -15,10 +15,21 @@ import FilterPills from "../components/FilterPills";
 import OutfitCard from "../components/OutfitCard";
 import BottomNav from "../components/BottomNav";
 import { theme } from "../constants/theme";
+import { usePersonalScheduleEntries } from "../hooks/usePersonalScheduleEntries";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { contextApi, recommendationApi, outfitApi } from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
+import {
+  addScheduleDays,
+  atScheduleNoon,
+  formatScheduleDateKey,
+} from "../utils/scheduleDate";
+import {
+  formatPersonalScheduleTime,
+  getPersonalScheduleEntriesForDate,
+  toPersonalScheduleEvents,
+} from "../utils/personalSchedule";
 import type { Outfit } from "../constants/mockOutfits";
 
 const EVENT_TYPES = ["Work", "Study", "Event", "Casual", "Party"];
@@ -28,10 +39,9 @@ const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const buildDateOptions = (count = 7) => {
   const today = new Date();
   return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
+    const date = atScheduleNoon(addScheduleDays(today, index));
     return {
-      key: date.toISOString().slice(0, 10),
+      key: formatScheduleDateKey(date),
       label: DAY_LABELS[date.getDay()],
       day: date.getDate(),
       datetime: date.toISOString(),
@@ -47,14 +57,36 @@ export default function OutfitSelectionScreen() {
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [closetCount, setClosetCount] = useState(0);
   const [weatherLoaded, setWeatherLoaded] = useState(false);
-  const [approveLoading, setApproveLoading] = useState(false);
-  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+  const [savedOutfitIds, setSavedOutfitIds] = useState<Record<string, number>>({});
+  const [pendingOutfitAction, setPendingOutfitAction] = useState<{
+    id: string;
+    type: "approve" | "cancel";
+  } | null>(null);
+  const [dismissingOutfitId, setDismissingOutfitId] = useState<string | null>(null);
   const dateOptions = useMemo(() => buildDateOptions(7), []);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
+  const { entries: personalScheduleEntries } = usePersonalScheduleEntries();
 
   const selectedEvent = EVENT_TYPES[eventIndex];
   const selectedStyle = STYLE_TYPES[styleIndex];
   const selectedDate = dateOptions[selectedDateIndex];
+  const selectedDateValue = useMemo(
+    () => new Date(selectedDate?.datetime || new Date().toISOString()),
+    [selectedDate],
+  );
+  const matchingPersonalEntries = useMemo(
+    () =>
+      getPersonalScheduleEntriesForDate(
+        personalScheduleEntries,
+        selectedDateValue,
+      ),
+    [personalScheduleEntries, selectedDateValue],
+  );
+  const personalCalendarContext = useMemo(
+    () =>
+      toPersonalScheduleEvents(personalScheduleEntries, selectedDateValue),
+    [personalScheduleEntries, selectedDateValue],
+  );
 
   const showNotice = (title: string, message: string) => {
     Alert.alert(title, message);
@@ -73,6 +105,15 @@ export default function OutfitSelectionScreen() {
       { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
     ]);
   };
+  const getLocalOutfitId = (outfit: Outfit) => String(outfit.id);
+  const isOutfitApproved = (outfit: Outfit) =>
+    Boolean(savedOutfitIds[getLocalOutfitId(outfit)]);
+  const getPendingAction = (outfit: Outfit) =>
+    pendingOutfitAction?.id === getLocalOutfitId(outfit)
+      ? pendingOutfitAction.type
+      : null;
+  const isDismissingOutfit = (outfit: Outfit) =>
+    dismissingOutfitId === getLocalOutfitId(outfit);
 
   const canGenerate = useMemo(
     () => !!selectedEvent && !!selectedStyle,
@@ -103,6 +144,22 @@ export default function OutfitSelectionScreen() {
     };
   }, []);
 
+  const applyPersonalRoutine = (entry: (typeof matchingPersonalEntries)[number]) => {
+    const nextEventIndex = EVENT_TYPES.findIndex(
+      (item) => item === entry.eventType,
+    );
+    if (nextEventIndex >= 0) {
+      setEventIndex(nextEventIndex);
+    }
+
+    const nextStyleIndex = STYLE_TYPES.findIndex(
+      (item) => item === entry.preferredStyle,
+    );
+    if (nextStyleIndex >= 0) {
+      setStyleIndex(nextStyleIndex);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!canGenerate) return;
     setLoading(true);
@@ -128,10 +185,14 @@ export default function OutfitSelectionScreen() {
       const result = await recommendationApi.recommendBySelection({
         selectedEventType: selectedEvent,
         selectedStyle,
-        closet: closet.length ? closet : undefined,
+        closet,
         weather,
+        calendar: personalCalendarContext.length
+          ? personalCalendarContext
+          : undefined,
       });
       const mapped = mapRecommendationsToOutfits(result, closet, weather);
+      setSavedOutfitIds({});
       setOutfits(mapped);
       setOutfitCache(mapped);
       setWeatherLoaded(true);
@@ -165,7 +226,8 @@ export default function OutfitSelectionScreen() {
       return;
     }
 
-    setApproveLoading(true);
+    const localId = getLocalOutfitId(outfit);
+    setPendingOutfitAction({ id: localId, type: "approve" });
     try {
       const saved = await outfitApi.createOutfit({
         name: outfit.title,
@@ -177,20 +239,96 @@ export default function OutfitSelectionScreen() {
         showNotice("Unable to save outfit", "Save failed: missing outfit id.");
         return;
       }
-      setApprovedIds((prev) => {
-        const next = new Set(prev);
-        next.add(String(outfit.id));
-        return next;
-      });
-      showNotice("Outfit saved", `Outfit saved (id=${saved.id}).`);
+      setSavedOutfitIds((prev) => ({ ...prev, [localId]: saved.id }));
+      showNotice("Outfit approved", "Saved to your outfits. You can cancel approval later.");
     } catch (err) {
       showNotice(
         "Unable to save outfit",
         err instanceof Error ? err.message : "Failed to save outfit.",
       );
     } finally {
-      setApproveLoading(false);
+      setPendingOutfitAction((prev) =>
+        prev?.id === localId ? null : prev,
+      );
     }
+  };
+
+  const handleCancelApproval = (outfit: Outfit) => {
+    const localId = getLocalOutfitId(outfit);
+    const savedId = savedOutfitIds[localId];
+    if (!savedId) return;
+
+    Alert.alert(
+      "Cancel approval",
+      "Remove this saved outfit from your approved outfits?",
+      [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Cancel approval",
+          style: "destructive",
+          onPress: async () => {
+            setPendingOutfitAction({ id: localId, type: "cancel" });
+            try {
+              await outfitApi.deleteOutfit(savedId);
+              setSavedOutfitIds((prev) => {
+                const next = { ...prev };
+                delete next[localId];
+                return next;
+              });
+              showNotice("Approval cancelled", "This outfit is no longer saved.");
+            } catch (err) {
+              showNotice(
+                "Unable to cancel approval",
+                err instanceof Error ? err.message : "Failed to cancel approval.",
+              );
+            } finally {
+              setPendingOutfitAction((prev) =>
+                prev?.id === localId ? null : prev,
+              );
+            }
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const removeGeneratedOutfit = (outfit: Outfit) => {
+    const localId = getLocalOutfitId(outfit);
+    setOutfits((prev) => {
+      const next = prev.filter((item) => getLocalOutfitId(item) !== localId);
+      setOutfitCache(next);
+      return next;
+    });
+    setSavedOutfitIds((prev) => {
+      if (!(localId in prev)) return prev;
+      const next = { ...prev };
+      delete next[localId];
+      return next;
+    });
+  };
+
+  const handleDismissGenerated = (outfit: Outfit) => {
+    const localId = getLocalOutfitId(outfit);
+    Alert.alert(
+      "Cancel outfit",
+      "Remove this generated outfit from the current suggestions?",
+      [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Cancel outfit",
+          style: "destructive",
+          onPress: () => {
+            setDismissingOutfitId(localId);
+            removeGeneratedOutfit(outfit);
+            setDismissingOutfitId((current) =>
+              current === localId ? null : current,
+            );
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -207,6 +345,44 @@ export default function OutfitSelectionScreen() {
           />
 
           <View style={styles.sectionCard}>
+            <View style={styles.personalPlanCard}>
+              <View style={styles.personalPlanHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>Personal schedule</Text>
+                  <Text style={styles.sectionHint}>
+                    AI uses matching routines for the selected day.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => router.push("/personal-schedule")}>
+                  <Text style={styles.personalPlanLink}>Manage</Text>
+                </TouchableOpacity>
+              </View>
+              {matchingPersonalEntries.length ? (
+                matchingPersonalEntries.map((entry) => (
+                  <View key={entry.id} style={styles.personalPlanItem}>
+                    <View style={styles.personalPlanText}>
+                      <Text style={styles.personalPlanTitle}>{entry.title}</Text>
+                      <Text style={styles.personalPlanMeta}>
+                        {entry.eventType} | {entry.preferredStyle} | {formatPersonalScheduleTime(entry)}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.personalPlanButton}
+                      onPress={() => applyPersonalRoutine(entry)}
+                    >
+                      <Text style={styles.personalPlanButtonText}>Use</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.personalPlanEmpty}>
+                  No personal routine for this day yet.
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.sectionDivider} />
+
             <View style={styles.stepHeader}>
               <View style={styles.stepBadge}>
                 <Text style={styles.stepBadgeText}>1</Text>
@@ -333,22 +509,62 @@ export default function OutfitSelectionScreen() {
                       variant="compact"
                       onPress={() => router.push(`/outfit/${outfit.id}`)}
                     />
-                    {!approvedIds.has(String(outfit.id)) ? (
-                      <TouchableOpacity
-                        style={[
-                          styles.approveButtonCompact,
-                          approveLoading && styles.buttonDisabled,
-                        ]}
-                        onPress={() => handleApprove(outfit)}
-                        disabled={approveLoading}
-                      >
-                        {approveLoading ? (
-                          <ActivityIndicator color={theme.colors.text} />
-                        ) : (
-                          <Text style={styles.approveTextCompact}>Approve</Text>
-                        )}
-                      </TouchableOpacity>
-                    ) : null}
+                    {!isOutfitApproved(outfit) ? (
+                      <View style={styles.generatedActionRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.approveButtonCompact,
+                            styles.generatedActionButton,
+                            getPendingAction(outfit) === "approve" &&
+                              styles.buttonDisabled,
+                          ]}
+                          onPress={() => handleApprove(outfit)}
+                          disabled={Boolean(getPendingAction(outfit)) || isDismissingOutfit(outfit)}
+                        >
+                          {getPendingAction(outfit) === "approve" ? (
+                            <ActivityIndicator color={theme.colors.text} />
+                          ) : (
+                            <Text style={styles.approveTextCompact}>Approve</Text>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.cancelButtonCompact,
+                            styles.generatedActionButton,
+                            isDismissingOutfit(outfit) && styles.buttonDisabled,
+                          ]}
+                          onPress={() => handleDismissGenerated(outfit)}
+                          disabled={Boolean(getPendingAction(outfit)) || isDismissingOutfit(outfit)}
+                        >
+                          {isDismissingOutfit(outfit) ? (
+                            <ActivityIndicator color="#C44536" />
+                          ) : (
+                            <Text style={styles.cancelTextCompact}>Cancel</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={styles.approvedRowCompact}>
+                        <View style={styles.approvedBadgeCompact}>
+                          <Text style={styles.approvedBadgeTextCompact}>Approved</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.cancelButtonCompact,
+                            getPendingAction(outfit) === "cancel" &&
+                              styles.buttonDisabled,
+                          ]}
+                          onPress={() => handleCancelApproval(outfit)}
+                          disabled={Boolean(getPendingAction(outfit))}
+                        >
+                          {getPendingAction(outfit) === "cancel" ? (
+                            <ActivityIndicator color="#C44536" />
+                          ) : (
+                            <Text style={styles.cancelTextCompact}>Cancel</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 ))}
               </View>
@@ -435,6 +651,59 @@ const styles = StyleSheet.create({
   sectionDivider: {
     height: 1,
     backgroundColor: theme.colors.border,
+  },
+  personalPlanCard: {
+    gap: theme.spacing.sm,
+  },
+  personalPlanHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing.sm,
+  },
+  personalPlanLink: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+  },
+  personalPlanItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.card,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  personalPlanText: {
+    flex: 1,
+  },
+  personalPlanTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  personalPlanMeta: {
+    marginTop: 4,
+    fontSize: 10,
+    color: theme.colors.textSoft,
+  },
+  personalPlanButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surface,
+  },
+  personalPlanButtonText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  personalPlanEmpty: {
+    fontSize: 11,
+    color: theme.colors.textSoft,
   },
   dateRow: {
     paddingTop: theme.spacing.sm,
@@ -534,8 +803,15 @@ const styles = StyleSheet.create({
   gridItem: {
     width: "48%",
   },
-  approveButtonCompact: {
+  generatedActionRow: {
     marginTop: theme.spacing.sm,
+    flexDirection: "row",
+    gap: theme.spacing.sm,
+  },
+  generatedActionButton: {
+    flex: 1,
+  },
+  approveButtonCompact: {
     backgroundColor: theme.colors.primary,
     paddingVertical: 8,
     borderRadius: theme.radius.pill,
@@ -545,5 +821,39 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: theme.colors.text,
+  },
+  approvedRowCompact: {
+    marginTop: theme.spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+  },
+  approvedBadgeCompact: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.card,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  approvedBadgeTextCompact: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  cancelButtonCompact: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: theme.radius.pill,
+    backgroundColor: "#FCE8E6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelTextCompact: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#C44536",
   },
 });

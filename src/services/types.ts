@@ -67,6 +67,15 @@ export type RecommendationResponse = {
   model: string;
 };
 
+export type RecommendationPriorOutfit = {
+  source: "plan" | "history";
+  date: string;
+  outfitId?: number;
+  outfitName?: string;
+  eventType?: string;
+  itemIds: number[];
+};
+
 export type User = {
   id: number;
   firstName?: string;
@@ -103,12 +112,31 @@ export type ClothingItem = {
   isFavorite?: boolean;
 };
 
+export type ClothingItemCategory = {
+  id: number;
+  name: string;
+};
+
+export type ClothingItemTagLink = {
+  tag?: Tag | null;
+};
+
+export type OutfitEntityItem = {
+  id: number;
+  clothingItemId: number;
+  clothingItem?: (ClothingItem & {
+    category?: ClothingItemCategory | null;
+    tags?: ClothingItemTagLink[];
+  }) | null;
+};
+
 export type OutfitEntity = {
   id: number;
   name?: string;
   occasion?: string;
   weather?: string;
   isFavorite?: boolean;
+  items?: OutfitEntityItem[];
 };
 
 export type OutfitPlan = {
@@ -118,4 +146,13 @@ export type OutfitPlan = {
   planType?: string | null;
   reminderSent?: boolean | null;
   outfit?: OutfitEntity;
+};
+
+export type OutfitHistoryEntity = {
+  id: number;
+  userId?: number | null;
+  outfitId?: number | null;
+  wornDate?: string | null;
+  note?: string | null;
+  outfit?: OutfitEntity | null;
 };

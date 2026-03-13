@@ -1,49 +1,78 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
-  View,
-  Text,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  ActivityIndicator,
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
+  Text,
+  TextInput,
   TouchableOpacity,
-  Alert,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import AppHeader from "../components/AppHeader";
-import FilterPills from "../components/FilterPills";
 import BottomNav from "../components/BottomNav";
 import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
-import { ClothingItem } from "../services";
+
+type WardrobeItem = {
+  id: string;
+  title: string;
+  category: string;
+  image: string;
+};
+
+const normalizeSearchValue = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 
 export default function WardrobeScreen() {
   const router = useRouter();
   const filters = useMemo(
     () => ["All", "Top", "Bottom", "Outerwear", "Shoes", "Accessory"],
-    []
+    [],
   );
   const [activeFilter, setActiveFilter] = useState(0);
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [items, setItems] = useState<
-    Array<{ id: string; title: string; category: string; image: string }>
-  >([]);
+  const [items, setItems] = useState<WardrobeItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const currentFilterLabel = filters[activeFilter] || filters[0] || "All";
   const visibleItems = useMemo(() => {
-    if (activeFilter === 0) return items;
     const label = filters[activeFilter];
-    if (!label) return items;
-    return items.filter((item) => item.category === label);
-  }, [activeFilter, filters, items]);
+    const normalizedQuery = normalizeSearchValue(deferredSearchQuery);
+    return items.filter((item) => {
+      const matchesFilter =
+        activeFilter === 0 || !label ? true : item.category === label;
+      if (!matchesFilter) return false;
+      if (!normalizedQuery) return true;
+      return [item.title, item.category].some((value) =>
+        normalizeSearchValue(value).includes(normalizedQuery),
+      );
+    });
+  }, [activeFilter, deferredSearchQuery, filters, items]);
 
   const loadCloset = useCallback(() => {
     let isActive = true;
@@ -112,7 +141,10 @@ export default function WardrobeScreen() {
               setItems((prev) => prev.filter((item) => item.id !== itemId));
               showToast("success", "Item deleted.");
             } catch (err) {
-              showToast("error", err instanceof Error ? err.message : "Delete failed.");
+              showToast(
+                "error",
+                err instanceof Error ? err.message : "Delete failed.",
+              );
             } finally {
               setDeletingId(null);
             }
@@ -123,16 +155,16 @@ export default function WardrobeScreen() {
     );
   };
 
-  const handleViewDetail = (item: {
-    id: string;
-    title: string;
-    category: string;
-    image: string;
-  }) => {
+  const handleViewDetail = (item: WardrobeItem) => {
     router.push({
       pathname: "/detail-item",
       params: { id: item.id },
     });
+  };
+
+  const handleSelectFilter = (index: number) => {
+    setActiveFilter(index);
+    setIsFilterMenuOpen(false);
   };
 
   useEffect(() => loadCloset(), [loadCloset]);
@@ -149,18 +181,114 @@ export default function WardrobeScreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => setIsFilterMenuOpen(false)}
         >
           <AppHeader
             title="My Wardrobe"
             subtitle="Pick pieces to build outfits faster"
             onBackPress={() => router.back()}
           />
-          <View style={styles.filterWrap}>
-            <FilterPills
-              filters={filters}
-              activeIndex={activeFilter}
-              onPress={setActiveFilter}
-            />
+          <View style={styles.controlsWrap}>
+            <View style={styles.controlsRow}>
+              <View style={styles.searchInputWrap}>
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color={theme.colors.textSoft}
+                  style={styles.searchIcon}
+                />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  onFocus={() => setIsFilterMenuOpen(false)}
+                  placeholder="Search by name"
+                  placeholderTextColor={theme.colors.textSoft}
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  clearButtonMode="while-editing"
+                />
+                {searchQuery ? (
+                  <TouchableOpacity
+                    onPress={() => setSearchQuery("")}
+                    style={styles.clearSearchButton}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={18}
+                      color={theme.colors.textSoft}
+                    />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <View style={styles.filterMenuWrap}>
+                <TouchableOpacity
+                  style={[
+                    styles.filterTrigger,
+                    isFilterMenuOpen && styles.filterTriggerActive,
+                  ]}
+                  onPress={() => setIsFilterMenuOpen((prev) => !prev)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="options-outline"
+                    size={18}
+                    color={theme.colors.text}
+                    style={styles.filterTriggerIcon}
+                  />
+                  <Text style={styles.filterTriggerText} numberOfLines={1}>
+                    {currentFilterLabel}
+                  </Text>
+                  <Ionicons
+                    name={isFilterMenuOpen ? "chevron-up" : "chevron-down"}
+                    size={16}
+                    color={theme.colors.textSoft}
+                  />
+                </TouchableOpacity>
+                {isFilterMenuOpen ? (
+                  <View style={styles.filterDropdown}>
+                    {filters.map((label, index) => {
+                      const isActive = index === activeFilter;
+                      return (
+                        <TouchableOpacity
+                          key={label}
+                          style={[
+                            styles.filterOption,
+                            isActive && styles.filterOptionActive,
+                          ]}
+                          onPress={() => handleSelectFilter(index)}
+                          activeOpacity={0.85}
+                        >
+                          <Text
+                            style={[
+                              styles.filterOptionText,
+                              isActive && styles.filterOptionTextActive,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                          {isActive ? (
+                            <Ionicons
+                              name="checkmark"
+                              size={16}
+                              color={theme.colors.text}
+                            />
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+            {!loading && !requiresAuth ? (
+              <Text style={styles.searchMeta}>
+                {visibleItems.length} item{visibleItems.length === 1 ? "" : "s"}
+              </Text>
+            ) : null}
           </View>
           {loading ? (
             <View style={styles.loadingRow}>
@@ -174,7 +302,9 @@ export default function WardrobeScreen() {
             <View
               style={[
                 styles.toast,
-                toast.type === "success" ? styles.toastSuccess : styles.toastError,
+                toast.type === "success"
+                  ? styles.toastSuccess
+                  : styles.toastError,
               ]}
             >
               <Text style={styles.toastText}>{toast.message}</Text>
@@ -202,7 +332,10 @@ export default function WardrobeScreen() {
                   activeOpacity={0.9}
                   onPress={() => handleViewDetail(item)}
                 >
-                  <Image source={{ uri: item.image }} style={styles.cardImage} />
+                  <Image
+                    source={{ uri: item.image }}
+                    style={styles.cardImage}
+                  />
 
                   <TouchableOpacity
                     style={styles.deleteButton}
@@ -236,6 +369,14 @@ export default function WardrobeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+          ) : !loading && !requiresAuth && !error ? (
+            <Text style={styles.emptyText}>
+              {searchQuery
+                ? "No wardrobe items match your search."
+                : items.length
+                  ? "No wardrobe items found for this category."
+                  : "Your wardrobe is empty. Add your first item to get started."}
+            </Text>
           ) : null}
         </ScrollView>
 
@@ -265,9 +406,109 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 140,
   },
-  filterWrap: {
+  controlsWrap: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
+  },
+  controlsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: theme.spacing.sm,
+  },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.pill,
+    paddingLeft: 14,
+    paddingRight: 10,
+    minHeight: 46,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: theme.colors.text,
+    paddingVertical: 12,
+  },
+  clearSearchButton: {
+    marginLeft: 8,
+    paddingVertical: 6,
+  },
+  filterMenuWrap: {
+    position: "relative",
+    zIndex: 20,
+  },
+  filterTrigger: {
+    minWidth: 126,
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    gap: 6,
+  },
+  filterTriggerActive: {
+    borderColor: theme.colors.primaryDark,
+    backgroundColor: "#FFF6D9",
+  },
+  filterTriggerIcon: {
+    marginRight: 2,
+  },
+  filterTriggerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  filterDropdown: {
+    position: "absolute",
+    top: 52,
+    right: 0,
+    minWidth: 180,
+    padding: 8,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
+  },
+  filterOption: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    borderRadius: theme.radius.md,
+  },
+  filterOptionActive: {
+    backgroundColor: "#FFF4CC",
+  },
+  filterOptionText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: theme.colors.textMuted,
+  },
+  filterOptionTextActive: {
+    color: theme.colors.text,
+  },
+  searchMeta: {
+    marginTop: 8,
+    fontSize: 11,
+    color: theme.colors.textSoft,
   },
   fab: {
     position: "absolute",

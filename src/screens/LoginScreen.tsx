@@ -13,10 +13,9 @@ import { useRouter } from "expo-router";
 import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
-import Constants from "expo-constants";
 import { theme } from "../constants/theme";
 import { authApi } from "../services/outfitApi";
-import { isApiError, setAuthToken } from "../services/apiClient";
+import { setAuthToken } from "../services/apiClient";
 import { setStoredRefreshToken, setStoredToken } from "../services/authStore";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -31,15 +30,7 @@ export default function LoginScreen() {
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
   const androidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
   const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-  const appOwnership = Constants.appOwnership;
-  const proxyRedirectUri = "https://auth.expo.io/@vinh33333/WearlyStyles";
-  const redirectUri =
-    appOwnership === "expo"
-      ? proxyRedirectUri
-      : AuthSession.makeRedirectUri({
-          useProxy: true,
-          projectNameForProxy: "@vinh33333/WearlyStyles",
-        });
+  const redirectUri = "https://auth.expo.io/@vinh33333/WearlyStyles";
   const googleConfig = useMemo(
     () => ({
       expoClientId,
@@ -120,9 +111,7 @@ export default function LoginScreen() {
       return;
     }
     setError(null);
-    const result = await promptAsync({ useProxy: true, redirectUri });
-    const safeParams = result?.params ? JSON.stringify(result.params) : "no-params";
-    setAuthDebug(`promptResult.type=${result.type}\nparams=${safeParams}`);
+    await promptAsync();
   };
 
   return (
@@ -256,11 +245,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
     fontSize: 12,
     color: "#C44536",
-  },
-  debugText: {
-    marginBottom: theme.spacing.sm,
-    fontSize: 10,
-    color: theme.colors.textSoft,
   },
   label: {
     fontSize: 11,
