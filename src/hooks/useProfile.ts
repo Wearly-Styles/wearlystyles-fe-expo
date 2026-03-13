@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { getMyProfile } from "../services/profileApi";
 
 export const useProfile = () => {
@@ -6,21 +6,30 @@ export const useProfile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
+
       const data = await getMyProfile();
-      console.log("Fetched profile:", data); // <-- debug
+
       setProfile(data);
     } catch (err: any) {
-      console.error("Error fetching profile:", err); // <-- debug
+      console.error("Error fetching profile:", err);
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
+  return {
+    profile,
+    loading,
+    error,
+    refetch: fetchProfile,
+    setProfile,
   };
-
-  useEffect(() => { fetchProfile(); }, []);
-
-  return { profile, loading, error, refetch: fetchProfile };
 };
