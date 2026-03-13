@@ -14,12 +14,29 @@ import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
 import OutfitCard from "../components/OutfitCard";
 import { theme } from "../constants/theme";
+import { usePersonalScheduleEntries } from "../hooks/usePersonalScheduleEntries";
 import { getAuthToken, isApiError } from "../services/apiClient";
-import { contextApi, recommendationApi, outfitPlanApi } from "../services/outfitApi";
+import {
+  contextApi,
+  recommendationApi,
+  outfitApi,
+  outfitPlanApi,
+} from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
-import type { Outfit } from "../constants/mockOutfits";
-import type { NormalizedWeather } from "../services/types";
+import {
+  addScheduleDays,
+  atScheduleNoon,
+  endOfScheduleDay,
+  formatScheduleDateKey,
+  startOfScheduleDay,
+} from "../utils/scheduleDate";
+import {
+  buildPersonalScheduleAgenda,
+  formatPersonalScheduleTime,
+} from "../utils/personalSchedule";
+import type { Outfit, OutfitItem } from "../constants/mockOutfits";
+import type { NormalizedWeather, OutfitPlan } from "../services/types";
 
 const FALLBACK_IMAGE =
   "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80";
@@ -28,15 +45,40 @@ const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const buildWeatherDays = (count = 7) => {
   const today = new Date();
   return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
+    const date = atScheduleNoon(addScheduleDays(today, index));
     return {
-      key: date.toISOString().slice(0, 10),
+      key: formatScheduleDateKey(date),
       label: DAY_LABELS[date.getDay()],
       dayNumber: date.getDate(),
       datetime: date.toISOString(),
+      date,
     };
   });
+};
+
+const toPlannedOutfit = (plan: OutfitPlan): Outfit => {
+  const items: OutfitItem[] =
+    plan.outfit?.items?.map((entry, index) => {
+      const clothingItem = entry.clothingItem;
+      const categoryName = clothingItem?.category?.name || "Item";
+      return {
+        id: String(clothingItem?.id ?? entry.clothingItemId ?? entry.id ?? index),
+        title: categoryName,
+        subtitle: clothingItem?.name || "Wardrobe item",
+        image: clothingItem?.image || FALLBACK_IMAGE,
+      };
+    }) || [];
+
+  return {
+    id: String(plan.outfitId),
+    title: plan.outfit?.name || `Outfit #${plan.outfitId}`,
+    subtitle: plan.outfit?.occasion || "Planned look",
+    image: items[0]?.image || FALLBACK_IMAGE,
+    tags: [plan.outfit?.occasion || "Planned"],
+    items,
+    weather: plan.outfit?.weather || "Weather unavailable",
+    mood: plan.planType || "Planned",
+  };
 };
 
 export default function HomeScreen() {
@@ -55,17 +97,38 @@ export default function HomeScreen() {
       key: string;
       label: string;
       dayNumber: number;
+      date: Date;
       weather: NormalizedWeather | null;
     }>
   >([]);
   const [scheduledByDate, setScheduledByDate] = useState<
-    Record<string, { title: string; outfitId: number }>
+    Record<string, { title: string; outfitId: number; image: string }>
   >({});
+  const { entries: personalScheduleEntries } = usePersonalScheduleEntries();
 
   const todayLabel = useMemo(() => {
     const today = new Date();
     return DAY_LABELS[today.getDay()];
   }, []);
+  const todayScheduleKey = useMemo(
+    () => formatScheduleDateKey(atScheduleNoon(new Date())),
+    [],
+  );
+  const todayPersonalEntries = useMemo(
+    () =>
+      buildPersonalScheduleAgenda(personalScheduleEntries, [atScheduleNoon(new Date())])[
+        todayScheduleKey
+      ] || [],
+    [personalScheduleEntries, todayScheduleKey],
+  );
+  const personalScheduleByDate = useMemo(
+    () =>
+      buildPersonalScheduleAgenda(
+        personalScheduleEntries,
+        dailyWeather.map((entry) => entry.date),
+      ),
+    [dailyWeather, personalScheduleEntries],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -80,24 +143,28 @@ export default function HomeScreen() {
         return;
       }
       try {
-        const weather = await contextApi.getWeather({
-          lat: 10.8231,
-          lon: 106.6297,
-        });
-        const closet = await contextApi.getCloset();
+        const [weather, closet, savedOutfitSummary] = await Promise.all([
+          contextApi.getWeather({
+            lat: 10.8231,
+            lon: 106.6297,
+          }),
+          contextApi.getCloset(),
+          outfitApi.countOutfits(),
+        ]);
+        const savedOutfitCount = savedOutfitSummary?.count ?? 0;
         if (!closet.length) {
           if (!isActive) return;
           setRequiresCloset(true);
           setError("Add items to your closet to get outfit recommendations.");
           setHeroOutfit(null);
-          setOutfitCount(0);
+          setOutfitCount(savedOutfitCount);
           setItemCount(0);
           setLoading(false);
           return;
         }
         const result = await recommendationApi.recommendByContext({
           weather,
-          closet: closet.length ? closet : undefined,
+          closet,
         });
         const mapped = mapRecommendationsToOutfits(result, closet, weather);
         if (!isActive) return;
@@ -105,7 +172,7 @@ export default function HomeScreen() {
         setRequiresCloset(false);
         setOutfitCache(mapped);
         setHeroOutfit(mapped[0] ?? null);
-        setOutfitCount(mapped.length);
+        setOutfitCount(savedOutfitCount);
         setItemCount(closet.length);
       } catch (err) {
         if (isActive) {
@@ -119,6 +186,8 @@ export default function HomeScreen() {
             setError(err instanceof Error ? err.message : "Failed to load");
           }
           setHeroOutfit(null);
+          setOutfitCount(0);
+          setItemCount(0);
         }
       } finally {
         if (isActive) {
@@ -142,30 +211,22 @@ export default function HomeScreen() {
           return;
         }
         try {
-          const from = new Date();
-          const to = new Date(from);
-          to.setDate(from.getDate() + 7);
+          const from = startOfScheduleDay(new Date());
+          const to = endOfScheduleDay(addScheduleDays(from, 6));
           const plans = await outfitPlanApi.listPlans(from.toISOString(), to.toISOString());
           if (!isActive) return;
-          const map: Record<string, { title: string; outfitId: number }> = {};
+          const map: Record<string, { title: string; outfitId: number; image: string }> = {};
           const outfitsToCache: Outfit[] = [];
           plans.forEach((plan) => {
-            const title = plan.outfit?.name || `Outfit #${plan.outfitId}`;
-            const key = new Date(plan.planDate).toISOString().slice(0, 10);
+            const plannedOutfit = toPlannedOutfit(plan);
+            const title = plannedOutfit.title || `Outfit #${plan.outfitId}`;
+            const key = formatScheduleDateKey(new Date(plan.planDate));
             map[key] = {
               title,
               outfitId: plan.outfitId,
+              image: plannedOutfit.image || FALLBACK_IMAGE,
             };
-            outfitsToCache.push({
-              id: String(plan.outfitId),
-              title,
-              subtitle: plan.outfit?.occasion || "Planned look",
-              image: FALLBACK_IMAGE,
-              tags: [plan.outfit?.occasion || "Planned"],
-              items: [],
-              weather: plan.outfit?.weather || "Weather unavailable",
-              mood: plan.planType || "Planned",
-            });
+            outfitsToCache.push(plannedOutfit);
           });
           setScheduledByDate(map);
           setOutfitCache(outfitsToCache);
@@ -197,11 +258,23 @@ export default function HomeScreen() {
                 lon: 106.6297,
                 datetime: day.datetime,
               });
-              return { key: day.key, label: day.label, dayNumber: day.dayNumber, weather };
+              return {
+                key: day.key,
+                label: day.label,
+                dayNumber: day.dayNumber,
+                date: day.date,
+                weather,
+              };
             } catch {
-              return { key: day.key, label: day.label, dayNumber: day.dayNumber, weather: null };
+              return {
+                key: day.key,
+                label: day.label,
+                dayNumber: day.dayNumber,
+                date: day.date,
+                weather: null,
+              };
             }
-          })
+          }),
         );
         if (isActive) {
           setDailyWeather(results);
@@ -240,7 +313,10 @@ export default function HomeScreen() {
                 </Text>
               </View>
               <View style={styles.heroActions}>
-                <TouchableOpacity style={styles.heroIcon}>
+                <TouchableOpacity
+                  style={styles.heroIcon}
+                  onPress={() => router.push("/personal-schedule")}
+                >
                   <Ionicons name="calendar-outline" size={18} color={theme.colors.text} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.heroIcon}>
@@ -338,18 +414,25 @@ export default function HomeScreen() {
                 >
                   {dailyWeather.map((entry) => {
                     const scheduled = scheduledByDate[entry.key];
+                    const personalEntriesForDay =
+                      personalScheduleByDate[entry.key] || [];
+                    const primaryPersonalEntry = personalEntriesForDay[0];
                     const temp = entry.weather?.tempC;
                     const label = entry.weather?.tags?.[0] || "N/A";
                     const humidity = entry.weather?.humidity;
                     const rain = entry.weather?.rainProbability;
                     return (
                       <TouchableOpacity
-                        key={entry.label}
+                        key={entry.key}
                         style={styles.weatherCard}
-                        activeOpacity={scheduled ? 0.8 : 1}
+                        activeOpacity={scheduled || primaryPersonalEntry ? 0.8 : 1}
                         onPress={() => {
                           if (scheduled) {
                             router.push(`/outfit/${scheduled.outfitId}`);
+                            return;
+                          }
+                          if (primaryPersonalEntry) {
+                            router.push("/personal-schedule");
                           }
                         }}
                       >
@@ -362,9 +445,28 @@ export default function HomeScreen() {
                         </Text>
                         <Text style={styles.weatherLabel}>{label}</Text>
                         {scheduled ? (
-                          <Text style={styles.weatherSchedule} numberOfLines={1}>
-                            {scheduled.title}
-                          </Text>
+                          <View style={styles.weatherScheduleCard}>
+                            <Image
+                              source={{ uri: scheduled.image }}
+                              style={styles.weatherScheduleImage}
+                            />
+                            <View style={styles.weatherScheduleBody}>
+                              <Text style={styles.weatherScheduleLabel}>Scheduled outfit</Text>
+                              <Text style={styles.weatherSchedule} numberOfLines={1}>
+                                {scheduled.title}
+                              </Text>
+                            </View>
+                          </View>
+                        ) : null}
+                        {primaryPersonalEntry ? (
+                          <View style={styles.personalSchedulePill}>
+                            <Text style={styles.personalScheduleTitle} numberOfLines={1}>
+                              {primaryPersonalEntry.title}
+                            </Text>
+                            <Text style={styles.personalScheduleMeta} numberOfLines={1}>
+                              {formatPersonalScheduleTime(primaryPersonalEntry)}
+                            </Text>
+                          </View>
                         ) : null}
                         <View style={styles.weatherMetaRow}>
                           <Text style={styles.weatherMeta}>
@@ -406,6 +508,42 @@ export default function HomeScreen() {
               <Text style={styles.quickSubtitle}>Pick event and style</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={styles.plannerCard}
+            activeOpacity={0.85}
+            onPress={() => router.push("/personal-schedule")}
+          >
+            <View style={styles.plannerIconWrap}>
+              <Ionicons name="calendar-clear-outline" size={22} color={theme.colors.text} />
+            </View>
+            <View style={styles.plannerTextWrap}>
+              <Text style={styles.plannerTitle}>Personal schedule</Text>
+              <Text style={styles.plannerSubtitle}>
+                {todayPersonalEntries.length
+                  ? `${todayPersonalEntries.length} routine(s) today. AI uses them before suggesting outfits.`
+                  : "Build recurring routines that AI uses before suggesting outfits."}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textSoft} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.plannerCard}
+            activeOpacity={0.85}
+            onPress={() => router.push("/outfit-history")}
+          >
+            <View style={styles.plannerIconWrap}>
+              <Ionicons name="time-outline" size={22} color={theme.colors.text} />
+            </View>
+            <View style={styles.plannerTextWrap}>
+              <Text style={styles.plannerTitle}>Outfit history</Text>
+              <Text style={styles.plannerSubtitle}>
+                Review outfits you marked as worn and reopen them anytime.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textSoft} />
+          </TouchableOpacity>
         </ScrollView>
 
         <BottomNav active="home" />
@@ -603,6 +741,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: theme.spacing.md,
   },
+  plannerCard: {
+    marginTop: theme.spacing.md,
+    marginHorizontal: theme.spacing.lg,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: theme.spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.md,
+  },
+  plannerIconWrap: {
+    height: 44,
+    width: 44,
+    borderRadius: 22,
+    backgroundColor: "#FFF4CC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  plannerTextWrap: {
+    flex: 1,
+  },
+  plannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  plannerSubtitle: {
+    marginTop: 4,
+    fontSize: 11,
+    color: theme.colors.textSoft,
+  },
   weatherRow: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.sm,
@@ -645,11 +816,50 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: theme.colors.textSoft,
   },
+  weatherScheduleCard: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    padding: 8,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.card,
+  },
+  weatherScheduleImage: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: theme.colors.border,
+  },
+  weatherScheduleBody: {
+    flex: 1,
+    gap: 2,
+  },
+  weatherScheduleLabel: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: theme.colors.textSoft,
+  },
   weatherSchedule: {
-    marginTop: 6,
     fontSize: 10,
     fontWeight: "700",
     color: theme.colors.text,
+  },
+  personalSchedulePill: {
+    marginTop: 8,
+    padding: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.card,
+    gap: 2,
+  },
+  personalScheduleTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  personalScheduleMeta: {
+    fontSize: 10,
+    color: theme.colors.textSoft,
   },
   weatherMetaRow: {
     marginTop: 6,

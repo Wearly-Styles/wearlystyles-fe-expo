@@ -30,6 +30,7 @@ export type NormalizedEvent = {
 export type NormalizedClosetItem = {
   id: number;
   name?: string;
+  categoryId?: number | null;
   category?: string;
   color?: string;
   image?: string;
@@ -39,13 +40,24 @@ export type NormalizedClosetItem = {
   tags: string[];
 };
 
+export type MissingItem = {
+  name: string;
+  category?: string;
+  reason?: string;
+};
+
 export type OutfitRecommendation = {
+  outfit?: {
+    name?: string;
+    items?: NormalizedClosetItem[];
+  };
   eventId?: string;
   eventTitle?: string;
   eventType?: string;
   style?: string;
   items: number[];
   notes: string[];
+  missingItems?: MissingItem[];
 };
 
 export type RecommendationResponse = {
@@ -53,6 +65,15 @@ export type RecommendationResponse = {
   alternatives: OutfitRecommendation[];
   recommendations?: OutfitRecommendation[];
   model: string;
+};
+
+export type RecommendationPriorOutfit = {
+  source: "plan" | "history";
+  date: string;
+  outfitId?: number;
+  outfitName?: string;
+  eventType?: string;
+  itemIds: number[];
 };
 
 export type User = {
@@ -91,12 +112,31 @@ export type ClothingItem = {
   isFavorite?: boolean;
 };
 
+export type ClothingItemCategory = {
+  id: number;
+  name: string;
+};
+
+export type ClothingItemTagLink = {
+  tag?: Tag | null;
+};
+
+export type OutfitEntityItem = {
+  id: number;
+  clothingItemId: number;
+  clothingItem?: (ClothingItem & {
+    category?: ClothingItemCategory | null;
+    tags?: ClothingItemTagLink[];
+  }) | null;
+};
+
 export type OutfitEntity = {
   id: number;
   name?: string;
   occasion?: string;
   weather?: string;
   isFavorite?: boolean;
+  items?: OutfitEntityItem[];
 };
 
 export type OutfitPlan = {
@@ -106,4 +146,13 @@ export type OutfitPlan = {
   planType?: string | null;
   reminderSent?: boolean | null;
   outfit?: OutfitEntity;
+};
+
+export type OutfitHistoryEntity = {
+  id: number;
+  userId?: number | null;
+  outfitId?: number | null;
+  wornDate?: string | null;
+  note?: string | null;
+  outfit?: OutfitEntity | null;
 };

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -6,23 +6,354 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
+import OutfitCard from "../components/OutfitCard";
 import { theme } from "../constants/theme";
-import { getOutfitById } from "../utils/outfitStore";
+import { contextApi, outfitApi, outfitHistoryApi } from "../services/outfitApi";
+import type {
+  NormalizedClosetItem,
+  OutfitEntity,
+  OutfitHistoryEntity,
+} from "../services/types";
+import { getOutfitById, setOutfitCache } from "../utils/outfitStore";
+import type { Outfit, OutfitItem } from "../constants/mockOutfits";
 
 type OutfitDetailScreenProps = {
   outfitId: string;
 };
 
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80";
+
+const getClosetItemId = (item: OutfitItem) =>
+  Number(String(item.id).split("-")[0]);
+
+const getPieceName = (item: OutfitItem) =>
+  item.subtitle?.trim() || item.title?.trim() || "Wardrobe item";
+
+const getPieceLabel = (item: OutfitItem) =>
+  item.title?.trim() || "Piece";
+
+const toOutfitItem = (item: NormalizedClosetItem): OutfitItem => ({
+  id: String(item.id),
+  title: item.category || "Item",
+  subtitle: item.name || "Closet pick",
+  image: item.image || FALLBACK_IMAGE,
+});
+
+const toOutfit = (entity: OutfitEntity): Outfit => {
+  const items =
+    entity.items?.map((entry, index) => {
+      const clothingItem = entry.clothingItem;
+      const categoryName = clothingItem?.category?.name || "Item";
+      return {
+        id: String(clothingItem?.id ?? entry.clothingItemId ?? entry.id ?? index),
+        title: categoryName,
+        subtitle: clothingItem?.name || "Wardrobe item",
+        image: clothingItem?.image || FALLBACK_IMAGE,
+      };
+    }) || [];
+
+  return {
+    id: String(entity.id),
+    title: entity.name || `Outfit #${entity.id}`,
+    subtitle: entity.occasion || "Saved outfit",
+    image: items[0]?.image || FALLBACK_IMAGE,
+    tags: [entity.occasion, entity.weather].filter(
+      (value): value is string => Boolean(value && value.trim()),
+    ),
+    items,
+    weather: entity.weather || "Weather unavailable",
+    mood: entity.occasion || "Scheduled",
+  };
+};
+
 export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps) {
   const router = useRouter();
-  const outfit = useMemo(
-    () => getOutfitById(outfitId),
-    [outfitId]
-  );
+  const cachedOutfit = useMemo(() => getOutfitById(outfitId), [outfitId]);
+  const [outfit, setOutfit] = useState<Outfit | null>(cachedOutfit ?? null);
+  const [draftOutfit, setDraftOutfit] = useState<Outfit | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(0);
+  const [closetItems, setClosetItems] = useState<NormalizedClosetItem[]>([]);
+  const [closetLoading, setClosetLoading] = useState(false);
+  const [savingChanges, setSavingChanges] = useState(false);
+  const [wearingToday, setWearingToday] = useState(false);
+  const [wearingLoading, setWearingLoading] = useState(false);
+
+  const numericOutfitId = Number(outfitId);
+  const canEditItems = Number.isInteger(numericOutfitId) && numericOutfitId > 0;
+  const displayOutfit = isEditing ? draftOutfit ?? outfit : outfit;
+
+  useEffect(() => {
+    setOutfit(cachedOutfit ?? null);
+    setLoadError(null);
+  }, [cachedOutfit]);
+
+  useEffect(() => {
+    setDraftOutfit(null);
+    setIsEditing(false);
+    setSelectedSlot(0);
+    setWearingToday(false);
+  }, [outfitId]);
+
+  useEffect(() => {
+    let isActive = true;
+    const needsRemoteDetail =
+      Number.isInteger(numericOutfitId) &&
+      numericOutfitId > 0 &&
+      (!cachedOutfit || !cachedOutfit.items.length);
+
+    if (!needsRemoteDetail) {
+      return () => {
+        isActive = false;
+      };
+    }
+
+    const loadOutfit = async () => {
+      setLoading(true);
+      try {
+        const entity = await outfitApi.getOutfitById(numericOutfitId);
+        if (!isActive) return;
+        const mapped = toOutfit(entity);
+        setOutfit(mapped);
+        setOutfitCache([mapped]);
+        setLoadError(null);
+      } catch (error) {
+        if (!isActive) return;
+        setLoadError(error instanceof Error ? error.message : "Failed to load outfit");
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadOutfit();
+    return () => {
+      isActive = false;
+    };
+  }, [cachedOutfit, numericOutfitId]);
+
+  useEffect(() => {
+    let isActive = true;
+    if (!canEditItems) {
+      return () => {
+        isActive = false;
+      };
+    }
+
+    const loadTodayStatus = async () => {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      try {
+        const histories = await outfitHistoryApi.listHistories(
+          from.toISOString(),
+          to.toISOString(),
+        );
+        if (!isActive) return;
+        setWearingToday(
+          (histories || []).some(
+            (entry: OutfitHistoryEntity) => Number(entry.outfitId) === numericOutfitId,
+          ),
+        );
+      } catch {
+        if (isActive) {
+          setWearingToday(false);
+        }
+      }
+    };
+
+    void loadTodayStatus();
+    return () => {
+      isActive = false;
+    };
+  }, [canEditItems, numericOutfitId]);
+
+  const selectedSwapCategory = useMemo(() => {
+    if (!isEditing) return null;
+    const selectedItem = draftOutfit?.items?.[selectedSlot];
+    if (!selectedItem) return null;
+
+    const selectedId = getClosetItemId(selectedItem);
+    if (!Number.isFinite(selectedId)) {
+      return selectedItem.title || null;
+    }
+
+    const matched = closetItems.find((item) => item.id === selectedId);
+    return matched?.category || selectedItem.title || null;
+  }, [closetItems, draftOutfit, isEditing, selectedSlot]);
+
+  const swapOptions = useMemo<OutfitItem[]>(() => {
+    if (!closetItems.length) return [];
+    const all = closetItems.map(toOutfitItem);
+    if (!isEditing) return all;
+
+    const selectedItem = draftOutfit?.items?.[selectedSlot];
+    if (!selectedItem) return all;
+
+    const selectedId = getClosetItemId(selectedItem);
+    if (!Number.isFinite(selectedId)) {
+      return all;
+    }
+
+    const matched = closetItems.find((item) => item.id === selectedId);
+    const matchedCategoryId = matched?.categoryId;
+
+    if (matchedCategoryId) {
+      return closetItems
+        .filter((item) => item.categoryId === matchedCategoryId)
+        .map(toOutfitItem);
+    }
+
+    const matchedCategory = (matched?.category || selectedItem.title || "").trim();
+    if (!matchedCategory) return all;
+
+    const normalized = matchedCategory.toLowerCase();
+    return closetItems
+      .filter((item) => (item.category || "").toLowerCase() === normalized)
+      .map(toOutfitItem);
+  }, [closetItems, draftOutfit, isEditing, selectedSlot]);
+
+  const handleOpenEdit = async () => {
+    if (!canEditItems || !outfit) return;
+    if (!outfit.items.length) {
+      Alert.alert("Cannot edit items", "This outfit does not have item details yet.");
+      return;
+    }
+
+    setDraftOutfit(outfit);
+    setIsEditing(true);
+    setSelectedSlot(0);
+
+    if (closetItems.length) {
+      return;
+    }
+
+    setClosetLoading(true);
+    try {
+      const closet = await contextApi.getCloset();
+      setClosetItems(closet || []);
+    } catch (error) {
+      setDraftOutfit(null);
+      setIsEditing(false);
+      Alert.alert(
+        "Unable to load wardrobe",
+        error instanceof Error ? error.message : "Failed to load wardrobe items.",
+      );
+    } finally {
+      setClosetLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setDraftOutfit(null);
+    setIsEditing(false);
+    setSelectedSlot(0);
+  };
+
+  const handleReplaceItem = (replacement: OutfitItem) => {
+    setDraftOutfit((prev) => {
+      if (!prev) return prev;
+      const items = [...prev.items];
+      if (!items[selectedSlot]) {
+        return prev;
+      }
+
+      items[selectedSlot] = replacement;
+      return {
+        ...prev,
+        image: items[0]?.image || prev.image,
+        items,
+      };
+    });
+  };
+
+  const handleSaveChanges = async () => {
+    if (!canEditItems || !draftOutfit) {
+      return;
+    }
+
+    const items = Array.from(
+      new Set(
+        draftOutfit.items
+          .map((item) => getClosetItemId(item))
+          .filter((id) => Number.isFinite(id)),
+      ),
+    );
+
+    if (!items.length) {
+      Alert.alert("Unable to save", "Select at least one wardrobe item.");
+      return;
+    }
+
+    setSavingChanges(true);
+    try {
+      const updated = await outfitApi.updateOutfit(numericOutfitId, {
+        name: draftOutfit.title,
+        occasion: draftOutfit.subtitle || undefined,
+        weather: draftOutfit.weather || undefined,
+        items,
+      });
+      const mapped = toOutfit(updated);
+      setOutfit(mapped);
+      setOutfitCache([mapped]);
+      setDraftOutfit(null);
+      setIsEditing(false);
+      setSelectedSlot(0);
+      Alert.alert(
+        "Outfit updated",
+        "Scheduled outfit items were updated. Any schedule using this saved outfit will use the new version.",
+      );
+    } catch (error) {
+      Alert.alert(
+        "Unable to update outfit",
+        error instanceof Error ? error.message : "Failed to update outfit.",
+      );
+    } finally {
+      setSavingChanges(false);
+    }
+  };
+
+  const handleWearToday = async () => {
+    if (!canEditItems) {
+      Alert.alert(
+        "Cannot mark as worn",
+        "Save or schedule this outfit first before using Wear today.",
+      );
+      return;
+    }
+
+    setWearingLoading(true);
+    try {
+      await outfitHistoryApi.wearToday({ outfitId: numericOutfitId });
+      setWearingToday(true);
+      Alert.alert(
+        "Marked as worn",
+        "This outfit was added to your outfit history.",
+        [
+          { text: "Close", style: "cancel" },
+          { text: "View history", onPress: () => router.push("/outfit-history") },
+        ],
+      );
+    } catch (error) {
+      Alert.alert(
+        "Unable to mark outfit",
+        error instanceof Error ? error.message : "Failed to save outfit history.",
+      );
+    } finally {
+      setWearingLoading(false);
+    }
+  };
 
   if (!outfit) {
     return (
@@ -35,16 +366,24 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
           />
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>
-              We could not find this outfit. Try refreshing recommendations.
+              {loading
+                ? "Loading outfit details..."
+                : "We could not find this outfit. Try refreshing recommendations."}
             </Text>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => router.back()}>
-              <Text style={styles.primaryText}>Go back</Text>
-            </TouchableOpacity>
+            {loading ? (
+              <ActivityIndicator color={theme.colors.primaryDark} />
+            ) : (
+              <TouchableOpacity style={styles.primaryButton} onPress={() => router.back()}>
+                <Text style={styles.primaryText}>Go back</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </SafeAreaView>
     );
   }
+
+  const activeOutfit = displayOutfit ?? outfit;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -55,32 +394,74 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
         >
           <AppHeader
             title="Outfit Details"
-            subtitle="See items and quick styling notes"
+            subtitle="See selected pieces"
             onBackPress={() => router.back()}
           />
-          <View style={styles.hero}>
-            <Image source={{ uri: outfit.image }} style={styles.heroImage} />
-            <View style={styles.heroInfo}>
-              <Text style={styles.heroTitle}>{outfit.title}</Text>
-              <Text style={styles.heroSubtitle}>{outfit.subtitle}</Text>
-              <View style={styles.metaRow}>
-                <Text style={styles.metaChip}>{outfit.weather}</Text>
-                <Text style={styles.metaChip}>{outfit.mood}</Text>
-              </View>
-            </View>
+          <View style={styles.outfitCardWrap}>
+            <OutfitCard outfit={activeOutfit} variant="detail" />
           </View>
+          {isEditing ? (
+            <View style={styles.editingNotice}>
+              <Text style={styles.editingNoticeText}>Editing this outfit</Text>
+            </View>
+          ) : null}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Included items</Text>
-            {outfit.items.length ? (
-              <View style={styles.itemsRow}>
-                {outfit.items.map((item) => (
-                  <View key={item.id} style={styles.itemCard}>
-                    <Image source={{ uri: item.image }} style={styles.itemImage} />
-                    <Text style={styles.itemTitle}>{item.title}</Text>
-                    <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
-                  </View>
+            <Text style={styles.sectionTitle}>Pieces</Text>
+            {displayOutfit?.items.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.itemsRow}
+              >
+                {displayOutfit.items.map((item, index) => (
+                  <TouchableOpacity
+                    key={`${item.id}-${index}`}
+                    style={[
+                      styles.itemCard,
+                      isEditing && index === selectedSlot && styles.itemCardActive,
+                    ]}
+                    activeOpacity={isEditing ? 0.85 : 1}
+                    onPress={() => {
+                      if (isEditing) {
+                        setSelectedSlot(index);
+                      }
+                    }}
+                  >
+                    <View style={styles.itemImageWrap}>
+                      <Image source={{ uri: item.image }} style={styles.itemImage} />
+                    </View>
+                    <View style={styles.itemBody}>
+                      <View style={styles.itemCardHeader}>
+                        <View style={styles.itemBadge}>
+                          <Text style={styles.itemBadgeText} numberOfLines={1}>
+                            {getPieceLabel(item)}
+                          </Text>
+                        </View>
+                        {isEditing && index === selectedSlot ? (
+                          <View style={[styles.itemBadge, styles.itemBadgeActive]}>
+                            <Text style={styles.itemBadgeTextActive}>Selected</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={styles.itemTitle} numberOfLines={1}>
+                        {getPieceName(item)}
+                      </Text>
+                      {getPieceName(item) !== getPieceLabel(item) ? (
+                        <Text style={styles.itemSubtitle} numberOfLines={1}>
+                          {getPieceLabel(item)}
+                        </Text>
+                      ) : null}
+                      {isEditing ? (
+                        <Text style={styles.itemHint}>
+                          {index === selectedSlot
+                            ? "Choose a replacement from wardrobe below."
+                            : "Tap to swap this piece."}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             ) : (
               <View style={styles.reasonCard}>
                 <Text style={styles.reasonText}>
@@ -88,24 +469,111 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
                 </Text>
               </View>
             )}
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Why it works</Text>
-            <View style={styles.reasonCard}>
-              <Text style={styles.reasonText}>
-                Soft neutrals balance heat and brightness. This outfit keeps you
-                breathable and polished while staying casual.
-              </Text>
-            </View>
+            {loading && !outfit.items.length ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={theme.colors.primaryDark} />
+                <Text style={styles.loadingText}>Loading item details...</Text>
+              </View>
+            ) : null}
+            {loadError && !outfit.items.length ? (
+              <Text style={styles.errorText}>{loadError}</Text>
+            ) : null}
+            {isEditing ? (
+              <View style={styles.editPanel}>
+                <Text style={styles.editTitle}>Swap from your wardrobe</Text>
+                <Text style={styles.editSubtitle}>
+                  Changes will update this saved outfit anywhere it is scheduled.
+                </Text>
+                {closetLoading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator color={theme.colors.primaryDark} />
+                    <Text style={styles.loadingText}>Loading matching wardrobe items...</Text>
+                  </View>
+                ) : swapOptions.length ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.swapRow}
+                  >
+                    {swapOptions.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.swapCard}
+                        activeOpacity={0.85}
+                        onPress={() => handleReplaceItem(item)}
+                      >
+                        <View style={styles.swapBadge}>
+                          <Text style={styles.swapBadgeText} numberOfLines={1}>
+                            {getPieceLabel(item)}
+                          </Text>
+                        </View>
+                        <Image source={{ uri: item.image }} style={styles.swapImage} />
+                        <Text style={styles.swapTitle} numberOfLines={1}>
+                          {getPieceName(item)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <View style={styles.reasonCard}>
+                    <Text style={styles.reasonText}>
+                      {selectedSwapCategory
+                        ? `No items found for ${selectedSwapCategory}.`
+                        : "No wardrobe items available for swapping."}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : null}
           </View>
         </ScrollView>
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.secondaryButton}>
-            <Text style={styles.secondaryText}>Save look</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryButton}>
-            <Text style={styles.primaryText}>Wear today</Text>
-          </TouchableOpacity>
+          {isEditing ? (
+            <>
+              <TouchableOpacity style={styles.secondaryButton} onPress={handleCancelEdit}>
+                <Text style={styles.secondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, savingChanges && styles.buttonDisabled]}
+                onPress={() => void handleSaveChanges()}
+                disabled={savingChanges}
+              >
+                {savingChanges ? (
+                  <ActivityIndicator color={theme.colors.text} />
+                ) : (
+                  <Text style={styles.primaryText}>Save changes</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : canEditItems ? (
+            <>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleOpenEdit()}>
+                <Text style={styles.secondaryText}>Edit items</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, (wearingLoading || wearingToday) && styles.buttonDisabled]}
+                onPress={() => void handleWearToday()}
+                disabled={wearingLoading || wearingToday}
+              >
+                {wearingLoading ? (
+                  <ActivityIndicator color={theme.colors.text} />
+                ) : (
+                  <Text style={styles.primaryText}>
+                    {wearingToday ? "Worn today" : "Wear today"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.secondaryButton}>
+                <Text style={styles.secondaryText}>Save look</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={() => void handleWearToday()}>
+                <Text style={styles.primaryText}>Wear today</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
     </SafeAreaView>
@@ -124,48 +592,19 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 120,
   },
-  hero: {
+  outfitCardWrap: {
     marginTop: theme.spacing.md,
     marginHorizontal: theme.spacing.lg,
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.xl,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
   },
-  heroImage: {
-    width: "100%",
-    height: 260,
-  },
-  heroInfo: {
-    padding: theme.spacing.lg,
-  },
-  heroTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: theme.colors.text,
-  },
-  heroSubtitle: {
-    marginTop: 6,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-  },
-  metaRow: {
-    flexDirection: "row",
-    gap: theme.spacing.sm,
+  editingNotice: {
     marginTop: theme.spacing.sm,
+    marginHorizontal: theme.spacing.lg,
+    alignSelf: "flex-start",
   },
-  metaChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.chip,
-    fontSize: 10,
-    color: theme.colors.textSoft,
-    fontWeight: "600",
+  editingNoticeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.accent,
   },
   section: {
     marginTop: theme.spacing.lg,
@@ -179,36 +618,87 @@ const styles = StyleSheet.create({
   },
   itemsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: theme.spacing.sm,
+    paddingRight: theme.spacing.xs,
   },
   itemCard: {
-    width: "48%",
+    width: 188,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
-    alignItems: "center",
-    paddingVertical: theme.spacing.md,
+    padding: theme.spacing.sm,
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: theme.spacing.sm,
     shadowColor: "#000",
     shadowOpacity: 0.04,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
     elevation: 1,
   },
+  itemCardActive: {
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.card,
+  },
+  itemCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.xs,
+    flexWrap: "wrap",
+  },
+  itemBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.chip,
+    maxWidth: "100%",
+  },
+  itemBadgeActive: {
+    backgroundColor: theme.colors.primary,
+  },
+  itemBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+  },
+  itemBadgeTextActive: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  itemImageWrap: {
+    height: 128,
+    width: "100%",
+    borderRadius: theme.radius.md,
+    backgroundColor: "#F6F0E6",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   itemImage: {
-    width: 48,
-    height: 48,
+    width: 96,
+    height: 96,
     borderRadius: theme.radius.sm,
+  },
+  itemBody: {
+    width: "100%",
+    minWidth: 0,
   },
   itemTitle: {
     marginTop: 8,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
     color: theme.colors.text,
   },
   itemSubtitle: {
     marginTop: 2,
-    fontSize: 9,
+    fontSize: 10,
     color: theme.colors.textSoft,
+  },
+  itemHint: {
+    marginTop: 6,
+    fontSize: 10,
+    color: theme.colors.accent,
   },
   reasonCard: {
     backgroundColor: theme.colors.surface,
@@ -231,6 +721,72 @@ const styles = StyleSheet.create({
     color: theme.colors.textSoft,
     textAlign: "center",
   },
+  loadingRow: {
+    marginTop: theme.spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: theme.colors.textSoft,
+  },
+  errorText: {
+    marginTop: theme.spacing.sm,
+    fontSize: 12,
+    color: theme.colors.accent,
+  },
+  editPanel: {
+    marginTop: theme.spacing.md,
+    gap: theme.spacing.sm,
+  },
+  editTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  editSubtitle: {
+    fontSize: 11,
+    color: theme.colors.textSoft,
+  },
+  swapRow: {
+    gap: theme.spacing.sm,
+    paddingVertical: 2,
+  },
+  swapCard: {
+    width: 96,
+    padding: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    gap: 8,
+  },
+  swapBadge: {
+    alignSelf: "stretch",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.chip,
+  },
+  swapBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+    textAlign: "center",
+  },
+  swapImage: {
+    width: 52,
+    height: 52,
+    borderRadius: theme.radius.sm,
+  },
+  swapTitle: {
+    fontSize: 11,
+    color: theme.colors.text,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   footer: {
     position: "absolute",
     left: 0,
@@ -247,6 +803,9 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: -4 },
     elevation: 6,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   secondaryButton: {
     flex: 1,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,10 +13,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
-import FilterPills from "../components/FilterPills";
 import OutfitCard from "../components/OutfitCard";
 import BottomNav from "../components/BottomNav";
 import { theme } from "../constants/theme";
+import { usePersonalScheduleEntries } from "../hooks/usePersonalScheduleEntries";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import {
   contextApi,
@@ -26,10 +26,16 @@ import {
 } from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
+import {
+  getPersonalScheduleEntriesForDate,
+  toPersonalScheduleEvents,
+  toPersonalSchedulePreferences,
+} from "../utils/personalSchedule";
 import type {
   NormalizedClosetItem,
   NormalizedEvent,
   OutfitPlan,
+  RecommendationPriorOutfit,
 } from "../services/types";
 import type { Outfit, OutfitItem } from "../constants/mockOutfits";
 
@@ -70,6 +76,14 @@ const parseDateKey = (key: string) => {
   return new Date(year, month - 1, day, 12);
 };
 
+const getGeneratedDateKeyFromOutfitId = (outfitId: string) => {
+  const prefix = outfitId.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(prefix) && outfitId.charAt(10) === "-") {
+    return prefix;
+  }
+  return null;
+};
+
 const buildMonthDays = (monthDate: Date) => {
   const year = monthDate.getFullYear();
   const monthIndex = monthDate.getMonth();
@@ -88,6 +102,18 @@ const buildMonthDays = (monthDate: Date) => {
   });
 };
 
+const getTodayDate = () => {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+};
+
+const getTodayDateKey = () => formatDateKey(getTodayDate());
+
+const getTodayMonthStart = () => {
+  const today = getTodayDate();
+  return new Date(today.getFullYear(), today.getMonth(), 1);
+};
+
 const toOutfitItem = (item: NormalizedClosetItem): OutfitItem => ({
   id: String(item.id),
   title: item.category || "Item",
@@ -95,9 +121,72 @@ const toOutfitItem = (item: NormalizedClosetItem): OutfitItem => ({
   image: item.image || FALLBACK_IMAGE,
 });
 
+const toPlannedOutfit = (plan: OutfitPlan): Outfit => {
+  const items =
+    plan.outfit?.items?.map((entry, index) => {
+      const clothingItem = entry.clothingItem;
+      const categoryName = clothingItem?.category?.name || "Item";
+      return {
+        id: String(clothingItem?.id ?? entry.clothingItemId ?? entry.id ?? index),
+        title: categoryName,
+        subtitle: clothingItem?.name || "Wardrobe item",
+        image: clothingItem?.image || FALLBACK_IMAGE,
+      };
+    }) || [];
+
+  return {
+    id: String(plan.outfitId),
+    title: plan.outfit?.name || "Scheduled outfit",
+    subtitle: plan.outfit?.occasion || "Planned look",
+    image: items[0]?.image || FALLBACK_IMAGE,
+    tags: [plan.outfit?.occasion || "Planned"],
+    items,
+    weather: plan.outfit?.weather || "Weather unavailable",
+    mood: plan.planType || "Planned",
+  };
+};
+
+const getPieceName = (item: OutfitItem) =>
+  item.subtitle?.trim() || item.title?.trim() || "Wardrobe item";
+
+const getPieceLabel = (item: OutfitItem) =>
+  item.title?.trim() || "Piece";
+
+const toRecentOutfitEntries = (
+  outfits: Outfit[],
+  date: Date,
+  fallbackEventType?: string,
+): RecommendationPriorOutfit[] => {
+  const entries: RecommendationPriorOutfit[] = [];
+
+  outfits.forEach((outfit) => {
+    const itemIds = Array.from(
+      new Set(
+        outfit.items
+          .map((item) => Number(item.id))
+          .filter((itemId) => Number.isFinite(itemId)),
+      ),
+    );
+
+    if (!itemIds.length) {
+      return;
+    }
+
+    entries.push({
+      source: "plan",
+      date: date.toISOString(),
+      outfitName: outfit.title,
+      eventType: fallbackEventType,
+      itemIds,
+    });
+  });
+
+  return entries;
+};
 export default function OutfitSuggestionsScreen() {
   const router = useRouter();
-  const filters = useMemo(() => ["All", "Casual", "Work", "Study", "Event"], []);
+  const calendarScrollRef = useRef<ScrollView | null>(null);
+  const datePickerScrollRef = useRef<ScrollView | null>(null);
   const [loading, setLoading] = useState(false);
   const [apiOutfits, setApiOutfits] = useState<Outfit[]>([]);
   const [closetItems, setClosetItems] = useState<NormalizedClosetItem[]>([]);
@@ -107,39 +196,37 @@ export default function OutfitSuggestionsScreen() {
   >({});
   const [generatedOutfitsByDate, setGeneratedOutfitsByDate] = useState<Record<string, Outfit>>({});
   const [savedOutfitIds, setSavedOutfitIds] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [requiresAuth, setRequiresAuth] = useState(false);
-  const [requiresCloset, setRequiresCloset] = useState(false);
-  const [approveLoading, setApproveLoading] = useState(false);
-  const [approveToast, setApproveToast] = useState<{
-    type: "success" | "error";
-    message: string;
+  const [approvalAction, setApprovalAction] = useState<{
+    id: string;
+    type: "approve" | "cancel";
   } | null>(null);
-  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
-  const [activeFilter, setActiveFilter] = useState(0);
-  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+  const [dismissingOutfitId, setDismissingOutfitId] = useState<string | null>(null);
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(
+    () => new Set([getTodayDateKey()]),
+  );
   const [generating, setGenerating] = useState(false);
-  const filteredOutfits = useMemo(() => {
-    if (activeFilter === 0) return apiOutfits;
-    const label = filters[activeFilter];
-    if (!label) return apiOutfits;
-    return apiOutfits.filter(
-      (outfit) =>
-        outfit.tags?.includes(label) ||
-        outfit.title?.toLowerCase().includes(label.toLowerCase()) ||
-        outfit.subtitle?.toLowerCase().includes(label.toLowerCase())
-    );
-  }, [activeFilter, apiOutfits, filters]);
-  const heroOutfit = filteredOutfits[0];
+  const { entries: personalScheduleEntries } = usePersonalScheduleEntries();
+  const heroOutfit = apiOutfits[0];
   const [editableOutfit, setEditableOutfit] = useState<Outfit | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(0);
   const calendarToken = process.env.EXPO_PUBLIC_CALENDAR_TOKEN?.trim();
+  const getLocalOutfitId = (outfit: Outfit) => String(outfit.id);
+  const getSavedOutfitId = (outfit: Outfit) => savedOutfitIds[getLocalOutfitId(outfit)];
+  const isOutfitApproved = (outfit: Outfit) => Boolean(getSavedOutfitId(outfit));
+  const isOutfitScheduled = (outfit: Outfit) => {
+    const savedId = getSavedOutfitId(outfit);
+    if (!savedId) return false;
+    return Object.values(scheduledOutfits).some(
+      (entry) => Number(entry.outfit.id) === savedId,
+    );
+  };
+  const getApprovalAction = (outfit: Outfit) =>
+    approvalAction?.id === getLocalOutfitId(outfit) ? approvalAction.type : null;
+  const isDismissingOutfit = (outfit: Outfit) =>
+    dismissingOutfitId === getLocalOutfitId(outfit);
 
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
-  });
+  const [calendarMonth, setCalendarMonth] = useState(getTodayMonthStart);
   const monthStart = useMemo(
     () => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1),
     [calendarMonth],
@@ -169,6 +256,28 @@ export default function OutfitSuggestionsScreen() {
     const label = MONTH_LABELS[calendarMonth.getMonth()];
     return `${label} ${calendarMonth.getFullYear()}`;
   }, [calendarMonth]);
+  const todayDateKey = getTodayDateKey();
+  const isCurrentMonth =
+    calendarMonth.getFullYear() === getTodayDate().getFullYear() &&
+    calendarMonth.getMonth() === getTodayDate().getMonth();
+
+  const showNotice = (title: string, message: string) => {
+    Alert.alert(title, message);
+  };
+
+  const showAuthRequired = (message: string) => {
+    Alert.alert("Sign in required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to login", onPress: () => router.replace("/login") },
+    ]);
+  };
+
+  const showClosetRequired = (message: string) => {
+    Alert.alert("Wardrobe required", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
+    ]);
+  };
 
   const handlePrevMonth = () => {
     setCalendarMonth(
@@ -183,9 +292,30 @@ export default function OutfitSuggestionsScreen() {
   };
 
   const handleGoToCurrentMonth = () => {
-    const today = new Date();
-    setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    setCalendarMonth(getTodayMonthStart());
+    setSelectedDates(new Set([todayDateKey]));
   };
+
+  const scrollToToday = useCallback(
+    (animated: boolean) => {
+      if (!isCurrentMonth) return;
+
+      const todayIndex = calendarDays.findIndex((day) => day.key === todayDateKey);
+      if (todayIndex < 0) return;
+
+      requestAnimationFrame(() => {
+        calendarScrollRef.current?.scrollTo({
+          x: Math.max(0, todayIndex * (150 + theme.spacing.sm) - theme.spacing.lg),
+          animated,
+        });
+        datePickerScrollRef.current?.scrollTo({
+          x: Math.max(0, todayIndex * (72 + theme.spacing.sm) - theme.spacing.lg),
+          animated,
+        });
+      });
+    },
+    [calendarDays, isCurrentMonth, todayDateKey],
+  );
   const selectedSwapCategory = useMemo(() => {
     if (!isEditing) return null;
     const selectedItem = editableOutfit?.items?.[selectedSlot];
@@ -241,8 +371,18 @@ export default function OutfitSuggestionsScreen() {
       const key = formatDateKey(eventDate);
       map[key] = map[key] ? [...map[key], event] : [event];
     });
+    calendarDays.forEach((day) => {
+      const personalEvents = toPersonalScheduleEvents(
+        personalScheduleEntries,
+        day.date,
+      );
+      if (!personalEvents.length) return;
+      map[day.key] = map[day.key]
+        ? [...map[day.key], ...personalEvents]
+        : personalEvents;
+    });
     return map;
-  }, [calendarEvents]);
+  }, [calendarDays, calendarEvents, personalScheduleEntries]);
 
   useEffect(() => {
     if (heroOutfit) {
@@ -293,21 +433,22 @@ export default function OutfitSuggestionsScreen() {
     const mapped: Record<string, { planId: number; outfit: Outfit }> = {};
     plans.forEach((plan) => {
       const dateKey = formatDateKey(new Date(plan.planDate));
-      const outfitName = plan.outfit?.name || "Scheduled outfit";
-      const outfit: Outfit = {
-        id: String(plan.outfitId),
-        title: outfitName,
-        subtitle: plan.outfit?.occasion || "Planned look",
-        image: FALLBACK_IMAGE,
-        tags: [plan.outfit?.occasion || "Planned"],
-        items: [],
-        weather: plan.outfit?.weather || "Weather unavailable",
-        mood: plan.planType || "Planned",
-      };
+      const outfit = toPlannedOutfit(plan);
       mapped[dateKey] = { planId: plan.id, outfit };
     });
     return mapped;
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      setCalendarMonth(getTodayMonthStart());
+      setSelectedDates(new Set([getTodayDateKey()]));
+    }, []),
+  );
+
+  useEffect(() => {
+    scrollToToday(false);
+  }, [scrollToToday]);
 
   useFocusEffect(
     useCallback(() => {
@@ -338,19 +479,114 @@ export default function OutfitSuggestionsScreen() {
     }, [monthStart, monthEnd]),
   );
 
+  const updateEditableOutfit = (updater: (prev: Outfit) => Outfit) => {
+    setEditableOutfit((prev) => (prev ? updater(prev) : prev));
+  };
+
+  const pinGeneratedOutfitForDate = (outfit: Outfit) => {
+    const dateKey = getGeneratedDateKeyFromOutfitId(String(outfit.id));
+    if (!dateKey) return;
+
+    setGeneratedOutfitsByDate((prev) => ({
+      ...prev,
+      [dateKey]: outfit,
+    }));
+  };
+
+  const syncEditedOutfit = (outfit: Outfit) => {
+    setApiOutfits((prev) => {
+      const updated = prev.map((item) =>
+        item.id === outfit.id ? outfit : item,
+      );
+      setOutfitCache(updated);
+      return updated;
+    });
+
+    const dateKey = getGeneratedDateKeyFromOutfitId(String(outfit.id));
+    if (!dateKey) return;
+
+    setGeneratedOutfitsByDate((prev) => {
+      if (!prev[dateKey]) return prev;
+      return {
+        ...prev,
+        [dateKey]: outfit,
+      };
+    });
+  };
+
+  const removeGeneratedOutfit = (outfit: Outfit) => {
+    const localId = getLocalOutfitId(outfit);
+    const dateKey = getGeneratedDateKeyFromOutfitId(localId);
+
+    setApiOutfits((prev) => {
+      const next = prev.filter((item) => getLocalOutfitId(item) !== localId);
+      setOutfitCache(next);
+
+      setGeneratedOutfitsByDate((prevByDate) => {
+        if (!dateKey) return prevByDate;
+
+        const currentForDate = prevByDate[dateKey];
+        if (currentForDate && getLocalOutfitId(currentForDate) !== localId) {
+          return prevByDate;
+        }
+
+        const replacement = next.find(
+          (item) => getGeneratedDateKeyFromOutfitId(getLocalOutfitId(item)) === dateKey,
+        );
+
+        if (!replacement) {
+          const updated = { ...prevByDate };
+          delete updated[dateKey];
+          return updated;
+        }
+
+        return {
+          ...prevByDate,
+          [dateKey]: replacement,
+        };
+      });
+
+      setEditableOutfit((current) => {
+        if (!next.length) return null;
+        if (current && getLocalOutfitId(current) !== localId) {
+          const stillVisible = next.find(
+            (item) => getLocalOutfitId(item) === getLocalOutfitId(current),
+          );
+          if (stillVisible) {
+            return stillVisible;
+          }
+        }
+
+        if (dateKey) {
+          const sameDayReplacement = next.find(
+            (item) => getGeneratedDateKeyFromOutfitId(getLocalOutfitId(item)) === dateKey,
+          );
+          if (sameDayReplacement) {
+            return sameDayReplacement;
+          }
+        }
+
+        return next[0];
+      });
+
+      return next;
+    });
+
+    setSavedOutfitIds((prev) => {
+      if (!(localId in prev)) return prev;
+      const next = { ...prev };
+      delete next[localId];
+      return next;
+    });
+    setApprovalAction((prev) => (prev?.id === localId ? null : prev));
+    setSelectedSlot(0);
+    setIsEditing(false);
+  };
+
   const handleToggleEdit = () => {
     if (!editableOutfit) return;
     if (isEditing) {
-      setApiOutfits((prev) => {
-        const updated =
-          prev.length === 0
-            ? [editableOutfit]
-            : prev.map((outfit, index) =>
-                index === 0 ? editableOutfit : outfit
-              );
-        setOutfitCache(updated);
-        return updated;
-      });
+      syncEditedOutfit(editableOutfit);
       setIsEditing(false);
       return;
     }
@@ -359,8 +595,7 @@ export default function OutfitSuggestionsScreen() {
   };
 
   const handleReplaceItem = (replacement: OutfitItem) => {
-    setEditableOutfit((prev) => {
-      if (!prev) return prev;
+    updateEditableOutfit((prev) => {
       const items = [...prev.items];
       if (!items.length) {
         items.push({
@@ -404,11 +639,6 @@ export default function OutfitSuggestionsScreen() {
     }
 
     setSavedOutfitIds((prev) => ({ ...prev, [localId]: created.id }));
-    setApprovedIds((prev) => {
-      const next = new Set(prev);
-      next.add(localId);
-      return next;
-    });
 
     return created.id;
   };
@@ -419,6 +649,7 @@ export default function OutfitSuggestionsScreen() {
     date: Date,
     existingPlanId?: number,
   ) => {
+    pinGeneratedOutfitForDate(outfit);
     const outfitId = await ensureSavedOutfitId(outfit);
     const planType = outfit.mood || undefined;
     const payload = {
@@ -458,18 +689,27 @@ export default function OutfitSuggestionsScreen() {
   ) => {
     const outfit = outfitOverride ?? editableOutfit;
     if (!outfit) return;
+    const generatedDateKey = getGeneratedDateKeyFromOutfitId(String(outfit.id));
+    if (generatedDateKey && generatedDateKey !== dateKey) {
+      showNotice(
+        "Wrong day selected",
+        "This outfit belongs to another day. Pick the suggestion for this date before scheduling.",
+      );
+      return;
+    }
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to schedule outfits.");
+      showAuthRequired("Please sign in to schedule outfits.");
       return;
     }
 
     try {
       setLoading(true);
-      setError(null);
       await scheduleOutfitForDate(outfit, dateKey, date, existingPlanId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to schedule outfit.");
+      showNotice(
+        "Unable to schedule outfit",
+        err instanceof Error ? err.message : "Failed to schedule outfit.",
+      );
     } finally {
       setLoading(false);
     }
@@ -478,18 +718,16 @@ export default function OutfitSuggestionsScreen() {
   const scheduleGeneratedOutfits = async (replaceExisting: boolean) => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      setError("Generate outfits before scheduling.");
+      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
       return;
     }
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to schedule outfits.");
+      showAuthRequired("Please sign in to schedule outfits.");
       return;
     }
 
     try {
       setLoading(true);
-      setError(null);
 
       const toCreate: Array<{
         dateKey: string;
@@ -574,8 +812,8 @@ export default function OutfitSuggestionsScreen() {
 
       const entries = Object.values(newEntries);
       if (!entries.length) {
-        showToast(
-          "error",
+        showNotice(
+          "Nothing changed",
           replaceExisting
             ? "No outfits were scheduled. Try generating again."
             : "All generated days are already scheduled.",
@@ -585,12 +823,11 @@ export default function OutfitSuggestionsScreen() {
 
       setScheduledOutfits((prev) => ({ ...prev, ...newEntries }));
       setOutfitCache(entries.map((entry) => entry.outfit));
-      showToast("success", `Scheduled ${entries.length} outfit(s).`);
+      showNotice("Schedule updated", `Scheduled ${entries.length} outfit(s).`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to schedule outfits.";
-      setError(message);
-      showToast("error", message);
+      showNotice("Unable to schedule outfits", message);
     } finally {
       setLoading(false);
     }
@@ -599,7 +836,7 @@ export default function OutfitSuggestionsScreen() {
   const handleScheduleGeneratedPress = () => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      setError("Generate outfits before scheduling.");
+      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
       return;
     }
 
@@ -637,13 +874,11 @@ export default function OutfitSuggestionsScreen() {
 
   const handleRemoveSchedule = async (dateKey: string, planId: number) => {
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      setError("Please sign in to manage your schedule.");
+      showAuthRequired("Please sign in to manage your schedule.");
       return;
     }
     try {
       setLoading(true);
-      setError(null);
       await outfitPlanApi.deletePlan(planId);
       setScheduledOutfits((prev) => {
         const next = { ...prev };
@@ -651,35 +886,39 @@ export default function OutfitSuggestionsScreen() {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove scheduled outfit.");
+      showNotice(
+        "Unable to remove scheduled outfit",
+        err instanceof Error ? err.message : "Failed to remove scheduled outfit.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const getSchedulableOutfitForDate = (dateKey: string) => {
+    const suggested = generatedOutfitsByDate[dateKey];
+    if (!editableOutfit) {
+      return suggested ?? null;
+    }
+
+    const editableDateKey = getGeneratedDateKeyFromOutfitId(String(editableOutfit.id));
+    if (editableDateKey === dateKey) {
+      return editableOutfit;
+    }
+
+    return suggested ?? null;
+  };
+
   const handlePressCalendarDay = (dateKey: string, date: Date) => {
     const scheduled = scheduledOutfits[dateKey];
-    const suggested = generatedOutfitsByDate[dateKey];
+    const outfitForDate = getSchedulableOutfitForDate(dateKey);
     if (!scheduled) {
-      if (!editableOutfit && !suggested) {
-        setError("Generate an outfit before scheduling.");
+      if (!outfitForDate) {
+        showNotice("No outfit selected", "Generate an outfit before scheduling.");
         return;
       }
 
-      const selectedForThisDate =
-        editableOutfit && String(editableOutfit.id).startsWith(`${dateKey}-`)
-          ? editableOutfit
-          : undefined;
-
-      const outfitToSchedule = suggested
-        ? selectedForThisDate ?? suggested
-        : editableOutfit ?? undefined;
-      if (!outfitToSchedule) {
-        setError("Generate an outfit before scheduling.");
-        return;
-      }
-
-      void handleScheduleOutfit(dateKey, date, undefined, outfitToSchedule);
+      void handleScheduleOutfit(dateKey, date, undefined, outfitForDate);
       return;
     }
 
@@ -694,9 +933,12 @@ export default function OutfitSuggestionsScreen() {
         {
           text: "Replace",
           onPress: () => {
-            const replacement = editableOutfit ?? suggested ?? undefined;
+            const replacement = outfitForDate;
             if (!replacement) {
-              setError("Select an outfit before replacing.");
+              showNotice(
+                "No outfit selected",
+                "Select or generate an outfit for this day before replacing.",
+              );
               return;
             }
             void handleScheduleOutfit(dateKey, date, scheduled.planId, replacement);
@@ -713,6 +955,7 @@ export default function OutfitSuggestionsScreen() {
   };
 
   const handleSelectOutfit = (outfit: Outfit) => {
+    pinGeneratedOutfitForDate(outfit);
     setEditableOutfit(outfit);
     setSelectedSlot(0);
     setIsEditing(false);
@@ -733,24 +976,20 @@ export default function OutfitSuggestionsScreen() {
   const handleGenerate = async () => {
     const token = getAuthToken();
     if (!token) {
-      setRequiresAuth(true);
-      setError("Please sign in to load outfit recommendations.");
+      showAuthRequired("Please sign in to load outfit recommendations.");
       return;
     }
     if (selectedDates.size === 0) {
-      setError("Select at least one day to generate outfits.");
+      showNotice("Select a day", "Select at least one day to generate outfits.");
       return;
     }
     setGenerating(true);
-    setError(null);
     try {
-      setApprovedIds(new Set());
       setSavedOutfitIds({});
       setGeneratedOutfitsByDate({});
       const closet = await contextApi.getCloset();
       if (!closet.length) {
-        setRequiresCloset(true);
-        setError("Add items to your closet to unlock suggestions.");
+        showClosetRequired("Add items to your closet to unlock suggestions.");
         setGenerating(false);
         return;
       }
@@ -768,15 +1007,28 @@ export default function OutfitSuggestionsScreen() {
 
       const results: Outfit[] = [];
       const suggestionsByDate: Record<string, Outfit> = {};
+      const recentGeneratedOutfits: RecommendationPriorOutfit[] = [];
       for (const day of orderedDates) {
         const weather = await contextApi.getWeather({
           lat: 10.8231,
           lon: 106.6297,
           datetime: day.date.toISOString(),
         });
+        const personalEntriesForDay = getPersonalScheduleEntriesForDate(
+          personalScheduleEntries,
+          day.date,
+        );
+        const dayEvents = eventsByDate[day.key] || [];
+        const preferences = toPersonalSchedulePreferences(personalEntriesForDay);
         const rec = await recommendationApi.recommendByContext({
           weather,
           closet,
+          calendar: dayEvents.length ? dayEvents : undefined,
+          preferences: preferences.length ? preferences : undefined,
+          planDate: day.date.toISOString(),
+          recentOutfits: recentGeneratedOutfits.length
+            ? recentGeneratedOutfits
+            : undefined,
         });
         const mapped = mapRecommendationsToOutfits(rec, closet, weather);
         if (mapped.length) {
@@ -788,6 +1040,9 @@ export default function OutfitSuggestionsScreen() {
             ...mappedWithIds,
           );
           suggestionsByDate[day.key] = mappedWithIds[0];
+          recentGeneratedOutfits.push(
+            ...toRecentOutfitEntries(mapped, day.date, dayEvents[0]?.eventType),
+          );
         }
       }
 
@@ -795,22 +1050,20 @@ export default function OutfitSuggestionsScreen() {
       setGeneratedOutfitsByDate(suggestionsByDate);
       setClosetItems(closet);
       setOutfitCache(results);
-      setActiveFilter(0);
-      setRequiresAuth(false);
-      setRequiresCloset(false);
       const firstKey = orderedDates[0]?.key;
       setEditableOutfit(
         firstKey ? suggestionsByDate[firstKey] ?? results[0] ?? null : results[0] ?? null,
       );
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
-        setRequiresAuth(true);
-        setError("Please sign in to load outfit recommendations.");
+        showAuthRequired("Please sign in to load outfit recommendations.");
       } else if (isApiError(err) && err.status === 400 && err.message.includes("Closet")) {
-        setRequiresCloset(true);
-        setError("Add items to your closet to unlock suggestions.");
+        showClosetRequired("Add items to your closet to unlock suggestions.");
       } else {
-        setError(err instanceof Error ? err.message : "Failed to generate");
+        showNotice(
+          "Unable to generate outfits",
+          err instanceof Error ? err.message : "Failed to generate",
+        );
       }
       setApiOutfits([]);
       setGeneratedOutfitsByDate({});
@@ -819,30 +1072,100 @@ export default function OutfitSuggestionsScreen() {
     }
   };
 
-  const showToast = (type: "success" | "error", message: string) => {
-    setApproveToast({ type, message });
-    setTimeout(() => {
-      setApproveToast(null);
-    }, 2500);
-  };
-
   const handleApprove = async () => {
     if (!editableOutfit) return;
     if (!getAuthToken()) {
-      setRequiresAuth(true);
-      showToast("error", "Please sign in to approve outfits.");
+      showAuthRequired("Please sign in to approve outfits.");
       return;
     }
 
-    setApproveLoading(true);
+    const localId = getLocalOutfitId(editableOutfit);
+    setApprovalAction({ id: localId, type: "approve" });
     try {
-      const savedId = await ensureSavedOutfitId(editableOutfit);
-      showToast("success", `Outfit saved (id=${savedId}).`);
+      await ensureSavedOutfitId(editableOutfit);
+      showNotice("Outfit approved", "Saved to your outfits and ready for scheduling.");
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "Failed to save outfit.");
+      showNotice(
+        "Unable to save outfit",
+        err instanceof Error ? err.message : "Failed to save outfit.",
+      );
     } finally {
-      setApproveLoading(false);
+      setApprovalAction((prev) => (prev?.id === localId ? null : prev));
     }
+  };
+
+  const handleDismissGenerated = () => {
+    if (!editableOutfit || isOutfitApproved(editableOutfit)) return;
+
+    const localId = getLocalOutfitId(editableOutfit);
+    Alert.alert(
+      "Cancel outfit",
+      "Remove this generated outfit from the current suggestions?",
+      [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Cancel outfit",
+          style: "destructive",
+          onPress: () => {
+            setDismissingOutfitId(localId);
+            removeGeneratedOutfit(editableOutfit);
+            setDismissingOutfitId((current) =>
+              current === localId ? null : current,
+            );
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const handleCancelApproval = () => {
+    if (!editableOutfit) return;
+    const localId = getLocalOutfitId(editableOutfit);
+    const savedId = savedOutfitIds[localId];
+    if (!savedId) return;
+
+    if (isOutfitScheduled(editableOutfit)) {
+      showNotice(
+        "Cannot cancel approval",
+        "This outfit is already scheduled. Remove it from the schedule first.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Cancel approval",
+      "Remove this saved outfit from your approved outfits?",
+      [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Cancel approval",
+          style: "destructive",
+          onPress: async () => {
+            setApprovalAction({ id: localId, type: "cancel" });
+            try {
+              await outfitApi.deleteOutfit(savedId);
+              setSavedOutfitIds((prev) => {
+                const next = { ...prev };
+                delete next[localId];
+                return next;
+              });
+              showNotice("Approval cancelled", "This outfit is no longer saved.");
+            } catch (err) {
+              showNotice(
+                "Unable to cancel approval",
+                err instanceof Error ? err.message : "Failed to cancel approval.",
+              );
+            } finally {
+              setApprovalAction((prev) =>
+                prev?.id === localId ? null : prev,
+              );
+            }
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -891,11 +1214,13 @@ export default function OutfitSuggestionsScreen() {
           </View>
           <ScrollView
             key={calendarMonthLabel}
+            ref={calendarScrollRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.calendarRow}
           >
             {calendarDays.map((day) => {
+              const isToday = day.key === todayDateKey;
               const events = eventsByDate[day.key] || [];
               const scheduled = scheduledOutfits[day.key];
               const suggested = generatedOutfitsByDate[day.key];
@@ -905,6 +1230,7 @@ export default function OutfitSuggestionsScreen() {
                   key={day.key}
                   style={[
                     styles.calendarCard,
+                    isToday && styles.calendarCardToday,
                     scheduled
                       ? styles.calendarCardActive
                       : showSuggested
@@ -920,6 +1246,14 @@ export default function OutfitSuggestionsScreen() {
                   {events[0] ? (
                     <Text style={styles.calendarEvent} numberOfLines={1}>
                       {events[0].title}
+                    </Text>
+                  ) : scheduled ? (
+                    <Text style={styles.calendarEvent} numberOfLines={1}>
+                      Scheduled outfit
+                    </Text>
+                  ) : showSuggested ? (
+                    <Text style={styles.calendarEvent} numberOfLines={1}>
+                      Suggested outfit
                     </Text>
                   ) : (
                     <Text style={styles.calendarEmpty}>No plans</Text>
@@ -950,33 +1284,43 @@ export default function OutfitSuggestionsScreen() {
             })}
           </ScrollView>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRow}
-          >
-            <FilterPills
-              filters={filters}
-              activeIndex={activeFilter}
-              onPress={setActiveFilter}
-            />
-          </ScrollView>
+          <View style={styles.personalScheduleCard}>
+            <View style={styles.personalScheduleHeader}>
+              <View>
+                <Text style={styles.personalScheduleTitle}>Personal schedule</Text>
+                <Text style={styles.personalScheduleSubtitle}>
+                  {personalScheduleEntries.length
+                    ? `${personalScheduleEntries.length} routine(s) will guide AI on matching days.`
+                    : "Add recurring routines so AI understands your weekly rhythm."}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => router.push("/personal-schedule")}>
+                <Text style={styles.personalScheduleLink}>Manage</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Pick a day</Text>
             <Text style={styles.sectionNote}>Generate for this date</Text>
           </View>
           <ScrollView
             key={`pick-${calendarMonthLabel}`}
+            ref={datePickerScrollRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dateRow}
           >
             {calendarDays.map((day) => {
+              const isToday = day.key === todayDateKey;
               const active = selectedDates.has(day.key);
               return (
                 <TouchableOpacity
                   key={day.key}
-                  style={[styles.dateChip, active && styles.dateChipActive]}
+                  style={[
+                    styles.dateChip,
+                    isToday && styles.dateChipToday,
+                    active && styles.dateChipActive,
+                  ]}
                   onPress={() => toggleDate(day.key)}
                 >
                   <Text style={[styles.dateLabel, active && styles.dateLabelActive]}>
@@ -1033,46 +1377,6 @@ export default function OutfitSuggestionsScreen() {
                 {generating ? "Loading recommendations..." : "Updating schedule..."}
               </Text>
             </View>
-          ) : error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : null}
-          {approveToast ? (
-            <View
-              style={[
-                styles.toast,
-                approveToast.type === "success"
-                  ? styles.toastSuccess
-                  : styles.toastError,
-              ]}
-            >
-              <Text style={styles.toastText}>{approveToast.message}</Text>
-            </View>
-          ) : null}
-          {requiresAuth ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Sign in to see personalized outfit suggestions.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.replace("/login")}
-              >
-                <Text style={styles.authButtonText}>Go to login</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          {requiresCloset ? (
-            <View style={styles.authCard}>
-              <Text style={styles.authText}>
-                Add items to your wardrobe to get personalized suggestions.
-              </Text>
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={() => router.push("/wardrobe")}
-              >
-                <Text style={styles.authButtonText}>Go to wardrobe</Text>
-              </TouchableOpacity>
-            </View>
           ) : null}
 
           {editableOutfit ? (
@@ -1081,24 +1385,95 @@ export default function OutfitSuggestionsScreen() {
               onPress={() => router.push(`/outfit/${editableOutfit.id}`)}
             />
           ) : null}
-          {editableOutfit && !approvedIds.has(String(editableOutfit.id)) ? (
-            <TouchableOpacity
-              style={[
-                styles.approveButton,
-                approveLoading && styles.buttonDisabled,
-              ]}
-              onPress={handleApprove}
-              disabled={approveLoading}
-            >
-              {approveLoading ? (
-                <ActivityIndicator color={theme.colors.text} />
-              ) : (
-                <Text style={styles.approveText}>Approve outfit</Text>
-              )}
-            </TouchableOpacity>
-          ) : null}
-          {editableOutfit && approvedIds.has(String(editableOutfit.id)) ? (
-            <Text style={styles.successText}>Outfit approved.</Text>
+          {editableOutfit ? (
+            isOutfitApproved(editableOutfit) ? (
+              <View style={styles.approvalStatusCard}>
+                <View style={styles.approvalStatusHeader}>
+                  <View style={styles.approvalBadge}>
+                    <Text style={styles.approvalBadgeText}>Approved</Text>
+                  </View>
+                  {isOutfitScheduled(editableOutfit) ? (
+                    <View style={[styles.approvalBadge, styles.approvalBadgeMuted]}>
+                      <Text style={styles.approvalBadgeText}>Scheduled</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.approvalStatusTitle}>
+                  {isOutfitScheduled(editableOutfit)
+                    ? "Approved and already scheduled"
+                    : "Approved and ready to schedule"}
+                </Text>
+                <Text style={styles.approvalStatusSubtitle}>
+                  {isOutfitScheduled(editableOutfit)
+                    ? "This look is already tied to your schedule. Remove it from schedule before cancelling approval."
+                    : "This look is saved to your outfits. You can keep it for later or cancel approval."}
+                </Text>
+                {isOutfitScheduled(editableOutfit) ? (
+                  <TouchableOpacity
+                    style={styles.scheduleManageButton}
+                    onPress={() => router.push("/plans")}
+                  >
+                    <Text style={styles.scheduleManageText}>Open schedule</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.cancelApprovalButton,
+                      getApprovalAction(editableOutfit) === "cancel" &&
+                        styles.buttonDisabled,
+                    ]}
+                    onPress={handleCancelApproval}
+                    disabled={Boolean(getApprovalAction(editableOutfit))}
+                  >
+                    {getApprovalAction(editableOutfit) === "cancel" ? (
+                      <ActivityIndicator color="#C44536" />
+                    ) : (
+                      <Text style={styles.cancelApprovalText}>Cancel approval</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <View style={styles.editableActionRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.approveButton,
+                    styles.editableActionButton,
+                    getApprovalAction(editableOutfit) === "approve" &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleApprove}
+                  disabled={
+                    Boolean(getApprovalAction(editableOutfit)) ||
+                    isDismissingOutfit(editableOutfit)
+                  }
+                >
+                  {getApprovalAction(editableOutfit) === "approve" ? (
+                    <ActivityIndicator color={theme.colors.text} />
+                  ) : (
+                    <Text style={styles.approveText}>Approve outfit</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelGeneratedButton,
+                    styles.editableActionButton,
+                    isDismissingOutfit(editableOutfit) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleDismissGenerated}
+                  disabled={
+                    Boolean(getApprovalAction(editableOutfit)) ||
+                    isDismissingOutfit(editableOutfit)
+                  }
+                >
+                  {isDismissingOutfit(editableOutfit) ? (
+                    <ActivityIndicator color="#C44536" />
+                  ) : (
+                    <Text style={styles.cancelGeneratedText}>Cancel</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )
           ) : null}
 
           {editableOutfit ? (
@@ -1119,7 +1494,7 @@ export default function OutfitSuggestionsScreen() {
                 style={styles.editInput}
                 value={editableOutfit.title}
                 onChangeText={(text) =>
-                  setEditableOutfit((prev) => ({ ...prev, title: text }))
+                  updateEditableOutfit((prev) => ({ ...prev, title: text }))
                 }
               />
               <Text style={styles.editLabel}>Short note</Text>
@@ -1127,7 +1502,7 @@ export default function OutfitSuggestionsScreen() {
                 style={styles.editInput}
                 value={editableOutfit.subtitle}
                 onChangeText={(text) =>
-                  setEditableOutfit((prev) => ({ ...prev, subtitle: text }))
+                  updateEditableOutfit((prev) => ({ ...prev, subtitle: text }))
                 }
               />
               <Text style={styles.editHint}>
@@ -1159,6 +1534,18 @@ export default function OutfitSuggestionsScreen() {
                     }
                   }}
                 >
+                  <View style={styles.itemCardHeader}>
+                    <View style={styles.itemBadge}>
+                      <Text style={styles.itemBadgeText} numberOfLines={1}>
+                        {getPieceLabel(item)}
+                      </Text>
+                    </View>
+                    {isEditing && index === selectedSlot ? (
+                      <View style={[styles.itemBadge, styles.itemBadgeActive]}>
+                        <Text style={styles.itemBadgeTextActive}>Selected</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <View style={styles.itemImageWrapper}>
                     <Image
                       source={{ uri: item.image }}
@@ -1166,11 +1553,13 @@ export default function OutfitSuggestionsScreen() {
                     />
                   </View>
                   <Text style={styles.itemTitle} numberOfLines={1}>
-                    {item.title}
+                    {getPieceName(item)}
                   </Text>
-                  <Text style={styles.itemSubtitle} numberOfLines={1}>
-                    {item.subtitle}
-                  </Text>
+                  {getPieceName(item) !== getPieceLabel(item) ? (
+                    <Text style={styles.itemSubtitle} numberOfLines={1}>
+                      {getPieceLabel(item)}
+                    </Text>
+                  ) : null}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -1190,9 +1579,14 @@ export default function OutfitSuggestionsScreen() {
                     activeOpacity={0.85}
                     onPress={() => handleReplaceItem(item)}
                   >
+                    <View style={styles.swapBadge}>
+                      <Text style={styles.swapBadgeText} numberOfLines={1}>
+                        {getPieceLabel(item)}
+                      </Text>
+                    </View>
                     <Image source={{ uri: item.image }} style={styles.swapImage} />
                     <Text style={styles.swapTitle} numberOfLines={1}>
-                      {item.subtitle}
+                      {getPieceName(item)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -1208,20 +1602,37 @@ export default function OutfitSuggestionsScreen() {
             )
           ) : null}
 
-          {filteredOutfits.length ? (
+          {apiOutfits.length ? (
             <>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>All suggestions</Text>
                 <Text style={styles.sectionNote}>Tap a card to load it</Text>
               </View>
               <View style={styles.grid}>
-                {filteredOutfits.map((outfit) => (
+                {apiOutfits.map((outfit) => (
                   <View key={outfit.id} style={styles.gridItem}>
                     <OutfitCard
                       outfit={outfit}
                       variant="compact"
                       onPress={() => handleSelectOutfit(outfit)}
                     />
+                    {isOutfitApproved(outfit) ? (
+                      <View style={styles.suggestionStatusRow}>
+                        <View style={styles.suggestionStatusBadge}>
+                          <Text style={styles.suggestionStatusText}>Approved</Text>
+                        </View>
+                        {isOutfitScheduled(outfit) ? (
+                          <View
+                            style={[
+                              styles.suggestionStatusBadge,
+                              styles.suggestionStatusBadgeMuted,
+                            ]}
+                          >
+                            <Text style={styles.suggestionStatusText}>Scheduled</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
                   </View>
                 ))}
               </View>
@@ -1247,11 +1658,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 140,
   },
-  filterRow: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.sm,
-  },
   dateRow: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.sm,
@@ -1262,12 +1668,18 @@ const styles = StyleSheet.create({
     width: 72,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: "transparent",
     paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
   },
+  dateChipToday: {
+    borderColor: theme.colors.accent,
+  },
   dateChipActive: {
     backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
   },
   dateLabel: {
     fontSize: 10,
@@ -1351,6 +1763,36 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: theme.colors.text,
   },
+  personalScheduleCard: {
+    marginTop: theme.spacing.sm,
+    marginHorizontal: theme.spacing.lg,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  personalScheduleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing.md,
+  },
+  personalScheduleTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  personalScheduleSubtitle: {
+    marginTop: 4,
+    fontSize: 11,
+    color: theme.colors.textSoft,
+  },
+  personalScheduleLink: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+  },
   calendarTodayButton: {
     paddingHorizontal: 12,
     height: 34,
@@ -1381,6 +1823,10 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
     elevation: 1,
+  },
+  calendarCardToday: {
+    borderWidth: 1,
+    borderColor: theme.colors.accent,
   },
   calendarCardActive: {
     borderWidth: 1,
@@ -1452,45 +1898,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.colors.textSoft,
   },
-  errorText: {
-    paddingHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#C44536",
-  },
   emptyText: {
     paddingHorizontal: theme.spacing.lg,
     marginTop: theme.spacing.md,
     fontSize: 12,
     color: theme.colors.textSoft,
   },
-  successText: {
-    paddingHorizontal: theme.spacing.lg,
+  editableActionRow: {
     marginTop: theme.spacing.sm,
-    fontSize: 12,
-    color: "#2E7D32",
-  },
-  toast: {
     marginHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
+    flexDirection: "row",
+    gap: theme.spacing.sm,
   },
-  toastSuccess: {
-    backgroundColor: "#E7F6EC",
-  },
-  toastError: {
-    backgroundColor: "#FCE8E6",
-  },
-  toastText: {
-    fontSize: 12,
-    color: theme.colors.text,
-    fontWeight: "600",
+  editableActionButton: {
+    flex: 1,
   },
   approveButton: {
-    marginTop: theme.spacing.sm,
-    marginHorizontal: theme.spacing.lg,
     backgroundColor: theme.colors.primary,
     paddingVertical: 10,
     borderRadius: theme.radius.pill,
@@ -1501,27 +1924,76 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: theme.colors.text,
   },
-  authCard: {
-    marginTop: theme.spacing.md,
+  approvalStatusCard: {
+    marginTop: theme.spacing.sm,
     marginHorizontal: theme.spacing.lg,
     padding: theme.spacing.md,
     borderRadius: theme.radius.lg,
     backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    gap: theme.spacing.sm,
+  },
+  approvalStatusHeader: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: theme.spacing.sm,
   },
-  authText: {
-    fontSize: 12,
-    color: theme.colors.textSoft,
-    textAlign: "center",
-  },
-  authButton: {
-    marginTop: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 8,
+  approvalBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.primary,
   },
-  authButtonText: {
+  approvalBadgeMuted: {
+    backgroundColor: theme.colors.card,
+  },
+  approvalBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  approvalStatusTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  approvalStatusSubtitle: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: theme.colors.textSoft,
+  },
+  cancelApprovalButton: {
+    minHeight: 40,
+    borderRadius: theme.radius.pill,
+    backgroundColor: "#FCE8E6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelApprovalText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#C44536",
+  },
+  cancelGeneratedButton: {
+    backgroundColor: "#FCE8E6",
+    paddingVertical: 10,
+    borderRadius: theme.radius.pill,
+    alignItems: "center",
+  },
+  cancelGeneratedText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#C44536",
+  },
+  scheduleManageButton: {
+    minHeight: 40,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.card,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scheduleManageText: {
     fontSize: 11,
     fontWeight: "700",
     color: theme.colors.text,
@@ -1576,9 +2048,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   itemCard: {
-    width: 112,
-    alignItems: "center",
-    paddingVertical: 12,
+    width: 128,
+    padding: 10,
     paddingHorizontal: 10,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
@@ -1593,28 +2064,55 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary,
     backgroundColor: theme.colors.card,
   },
+  itemCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing.xs,
+  },
+  itemBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.chip,
+    maxWidth: "100%",
+  },
+  itemBadgeActive: {
+    backgroundColor: theme.colors.primary,
+  },
+  itemBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+  },
+  itemBadgeTextActive: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
   itemImageWrapper: {
-    height: 54,
-    width: 54,
+    marginTop: 10,
+    height: 82,
+    width: "100%",
     borderRadius: theme.radius.md,
     backgroundColor: "#F6F0E6",
     alignItems: "center",
     justifyContent: "center",
   },
   itemImage: {
-    height: 44,
-    width: 44,
+    height: 62,
+    width: 62,
     borderRadius: theme.radius.sm,
   },
   itemTitle: {
     marginTop: 10,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
     color: theme.colors.text,
   },
   itemSubtitle: {
     marginTop: 2,
-    fontSize: 9,
+    fontSize: 10,
     color: theme.colors.textSoft,
   },
   swapRow: {
@@ -1644,15 +2142,30 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
     alignItems: "center",
   },
+  swapBadge: {
+    alignSelf: "stretch",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.chip,
+  },
+  swapBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: theme.colors.textSoft,
+    textAlign: "center",
+  },
   swapImage: {
     width: 48,
     height: 48,
     borderRadius: theme.radius.sm,
+    marginTop: 8,
   },
   swapTitle: {
     marginTop: 6,
-    fontSize: 9,
-    color: theme.colors.textSoft,
+    fontSize: 10,
+    color: theme.colors.text,
+    fontWeight: "600",
     textAlign: "center",
   },
   sectionHeader: {
@@ -1682,5 +2195,25 @@ const styles = StyleSheet.create({
   gridItem: {
     // Leave room for `grid.gap` so 2 columns don't wrap on small screens.
     width: "46%",
+  },
+  suggestionStatusRow: {
+    marginTop: theme.spacing.sm,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  suggestionStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.card,
+  },
+  suggestionStatusBadgeMuted: {
+    backgroundColor: "#FFF4CC",
+  },
+  suggestionStatusText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.colors.text,
   },
 });
