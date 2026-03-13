@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// screens/ProfileScreen.tsx
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,7 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  FlatList,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,28 +19,40 @@ import { setAuthToken } from "../services/apiClient";
 import { setStoredRefreshToken, setStoredToken } from "../services/authStore";
 import { useProfile } from "../hooks/useProfile";
 import { authApi } from "../services/outfitApi";
-
-const WARDROBE_DATA = [
-  { id: "1", image: "https://via.placeholder.com/150" },
-  { id: "2", image: "https://via.placeholder.com/150" },
-  { id: "3", image: "https://via.placeholder.com/150" },
-  { id: "4", image: "https://via.placeholder.com/150" },
-];
+import { useUserPosts } from "../hooks/useUserPost";
+import PostCard from "../components/PostCard";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"info" | "wardrobe">("info");
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const { profile, loading, error } = useProfile();
-  const userProfile = profile?.profile;
+  const { profile, loading: profileLoading, error: profileError } = useProfile();
+  const userProfile = profile?.profile || profile;
+
+  const userId =
+    profile?.id ||
+    userProfile?.id ||
+    userProfile?.userId ||
+    userProfile?._id;
+
+  const {
+    posts: userPosts,
+    loading: postsLoading,
+    error: postsError,
+    refetch: refetchPosts,
+  } = useUserPosts(1, 20);
+
+  useEffect(() => {
+  }, [userPosts, postsLoading, postsError]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
       await authApi.logout();
-    } catch {}
-    finally {
+    } catch (err) {
+      console.error("[ProfileScreen] Logout API error:", err);
+    } finally {
       setAuthToken(null);
       await setStoredToken(null);
       await setStoredRefreshToken(null);
@@ -48,41 +60,30 @@ export default function ProfileScreen() {
     }
   };
 
+  // --- RENDER INFO TAB ---
   const renderInfo = () => {
-    // Debug profile và avatar
-  console.log("Full profile data:", profile);
-  console.log("User profile:", userProfile);
-  console.log("Avatar URL:", userProfile?.avatar);
     const avatarUri =
-      userProfile && userProfile.avatar
-        ? userProfile.avatar
-        : "https://via.placeholder.com/150";
+      userProfile?.avatar || "https://via.placeholder.com/150";
 
     return (
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* Avatar */}
         <View style={styles.avatarContainer}>
-          {loading ? (
+          {profileLoading ? (
             <ActivityIndicator size="small" color="#F4B400" />
           ) : (
-            <Image
-              source={{ uri: avatarUri }}
-              style={styles.avatar}
-              resizeMode="cover"
-            />
+            <Image source={{ uri: avatarUri }} style={styles.avatar} />
           )}
         </View>
 
-        {/* Personal Info */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
           <View style={styles.infoRow}>
             <Ionicons name="person" size={20} color="#F4B400" />
-            <Text style={styles.infoText}>{userProfile?.fullName}</Text>
+            <Text style={styles.infoText}>{userProfile?.fullName || "N/A"}</Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="mail" size={20} color="#F4B400" />
-            <Text style={styles.infoText}>{profile?.email}</Text>
+            <Text style={styles.infoText}>{profile?.email || "N/A"}</Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="gift" size={20} color="#F4B400" />
@@ -97,12 +98,9 @@ export default function ProfileScreen() {
             <Text style={styles.infoText}>{userProfile?.location || "N/A"}</Text>
           </View>
           <Text style={styles.sectionTitle}>Bio</Text>
-          <Text style={styles.bioText}>
-            {userProfile?.bio || "No bio available"}
-          </Text>
+          <Text style={styles.bioText}>{userProfile?.bio || "No bio available"}</Text>
         </View>
 
-        {/* Account Actions */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Account Actions</Text>
           <TouchableOpacity
@@ -121,36 +119,52 @@ export default function ProfileScreen() {
     );
   };
 
-  const renderWardrobe = () => (
-    <FlatList
-      data={WARDROBE_DATA}
-      numColumns={2}
-      keyExtractor={(item) => item.id}
-      contentContainerStyle={{ paddingBottom: 120 }}
-      renderItem={({ item }) => (
-        <View style={styles.imageWrapper}>
-          <Image source={{ uri: item.image }} style={styles.wardrobeImage} />
-          <Ionicons
-            name="heart"
-            size={18}
-            color="red"
-            style={styles.heartIcon}
-          />
-        </View>
-      )}
-    />
-  );
+  // --- RENDER WARDROBE TAB ---
+  const renderWardrobe = () => {
 
-  if (loading)
+    if (postsLoading)
+      return (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#F4B400" />
+        </View>
+      );
+
+    if (postsError)
+      return (
+        <View style={styles.center}>
+          <Text>{postsError}</Text>
+        </View>
+      );
+
+    if (!userPosts.length)
+      return (
+        <View style={[styles.center, { marginTop: 50 }]}>
+          <Text>No posts available</Text>
+        </View>
+      );
+
+    return (
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+        {userPosts.map((post) => {
+          return <PostCard key={post.id} post={post} />;
+        })}
+      </ScrollView>
+    );
+  };
+
+  // --- MAIN RENDER ---
+  if (profileLoading)
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#F4B400" />
+        <Text>Loading profile...</Text>
       </View>
     );
-  if (error)
+
+  if (profileError)
     return (
       <View style={styles.center}>
-        <Text>{error}</Text>
+        <Text>Error loading profile: {profileError}</Text>
       </View>
     );
 
@@ -168,11 +182,12 @@ export default function ProfileScreen() {
           }
         />
 
-        {/* Tabs */}
         <View style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tabItem, activeTab === "info" && styles.activeTab]}
-            onPress={() => setActiveTab("info")}
+            onPress={() => {
+              setActiveTab("info");
+            }}
           >
             <Ionicons
               name="person-circle"
@@ -182,7 +197,9 @@ export default function ProfileScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabItem, activeTab === "wardrobe" && styles.activeTab]}
-            onPress={() => setActiveTab("wardrobe")}
+            onPress={() => {
+              setActiveTab("wardrobe");
+            }}
           >
             <Ionicons
               name="images"
@@ -200,6 +217,7 @@ export default function ProfileScreen() {
   );
 }
 
+// --- STYLES ---
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#fff" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -233,9 +251,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logoutText: { color: "#fff", fontWeight: "600" },
-  imageWrapper: { flex: 1, margin: 6, borderRadius: 12, overflow: "hidden", position: "relative" },
-  wardrobeImage: { width: "100%", height: 180 },
-  heartIcon: { position: "absolute", top: 8, right: 8 },
   avatarContainer: { alignItems: "center", marginTop: 16, marginBottom: 10 },
   avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: "#F4B400" },
 });
