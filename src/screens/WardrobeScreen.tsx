@@ -31,6 +31,7 @@ type WardrobeItem = {
   title: string;
   category: string;
   image: string;
+  isFavorite: boolean;
 };
 
 const normalizeSearchValue = (value: string) =>
@@ -337,6 +338,12 @@ export default function WardrobeScreen() {
                     style={styles.cardImage}
                   />
 
+                  {item.isFavorite && (
+                    <View style={styles.favoriteBadge}>
+                      <Ionicons name="star" size={14} color="#FFD700" />
+                    </View>
+                  )}
+
                   <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={(e) => {
@@ -614,6 +621,17 @@ const styles = StyleSheet.create({
   cardImage: {
     width: "100%",
     height: 130,
+  },
+  favoriteBadge: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    padding: 6,
+    borderRadius: theme.radius.pill,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteButton: {
     position: "absolute",

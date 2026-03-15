@@ -140,6 +140,10 @@ export const clothingApi = {
     request<{ id: number }>(`/mobile/clothing/items/${id}`, {
       method: "DELETE",
     }),
+    deleteCategory: (id: number) =>
+    request<{ id: number }>(`/mobile/clothing/categories/${id}`, {
+      method: "DELETE",
+    }),
 };
 
 export const outfitApi = {

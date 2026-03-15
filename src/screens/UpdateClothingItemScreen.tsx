@@ -2,6 +2,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+    Alert,
     ActivityIndicator,
     Image,
     ScrollView,
@@ -12,6 +13,7 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Toast from "react-native-root-toast";
 import AppHeader from "../components/AppHeader";
 import { theme } from "../constants/theme";
 import { setAuthToken } from "../services/apiClient";
@@ -149,9 +151,62 @@ export default function UpdateClothingItemScreen() {
             );
             setSelectedCategoryId(created.id);
             setNewCategory("");
+
+            Toast.show("Category added successfully!", {
+                duration: Toast.durations.SHORT,
+                position: Toast.positions.TOP,
+                shadow: true,
+                animation: true,
+                hideOnPress: true,
+                backgroundColor: "#2E7D32",
+                textColor: "#ffffff",
+            });
+
         } catch {
             setError("Failed to create category.");
         }
+    };
+
+    const handleDeleteCategory = (categoryId: number, categoryName: string) => {
+        Alert.alert(
+            "Delete Category",
+            `Are you sure you want to delete "${categoryName}"?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await clothingApi.deleteCategory(categoryId);
+
+                            setCategories((prev) => prev.filter((cat) => cat.id !== categoryId));
+
+                            if (selectedCategoryId === categoryId) {
+                                setSelectedCategoryId(null);
+                            }
+
+                            Toast.show(`Deleted "${categoryName}"`, {
+                                duration: Toast.durations.SHORT,
+                                position: Toast.positions.TOP,
+                                backgroundColor: "#C44536",
+                                textColor: "#ffffff",
+                                shadow: true,
+                                animation: true,
+                            });
+
+                        } catch (err: any) {
+                            console.error("Delete category error:", err);
+                            Toast.show("Failed to delete category", {
+                                duration: Toast.durations.SHORT,
+                                position: Toast.positions.TOP,
+                                backgroundColor: "#333",
+                            });
+                        }
+                    }
+                },
+            ]
+        );
     };
 
     const handleSubmit = async () => {
@@ -185,8 +240,18 @@ export default function UpdateClothingItemScreen() {
             console.log("🚀 Đang gửi Update...");
             await clothingApi.updateItem(Number(id), form);
 
-            // Chuyển hướng về trang Wardrobe và refresh
-            router.replace("/wardrobe");
+            Toast.show("Update successfully!", {
+                duration: Toast.durations.SHORT,
+                position: Toast.positions.TOP,
+                backgroundColor: "#2E7D32",
+                textColor: "#ffffff",
+                shadow: true,
+                animation: true,
+            });
+            setTimeout(() => {
+                router.replace("/wardrobe");
+            }, 200);
+
         } catch (err: any) {
             console.error("Update error:", err);
             setError(err.response?.data?.message || "Update failed.");
@@ -303,6 +368,8 @@ export default function UpdateClothingItemScreen() {
                                                 selectedCategoryId === category.id ? null : category.id
                                             )
                                         }
+                                        onLongPress={() => handleDeleteCategory(category.id, category.name)}
+                                        delayLongPress={500}
                                     >
                                         <Text
                                             style={[
