@@ -448,10 +448,11 @@ export const mapRecommendationsToOutfits = (
 
 export const mapClosetToWardrobe = (
   closet: NormalizedClosetItem[],
-): Array<{ id: string; title: string; category: string; image: string }> =>
+): Array<{ id: string; title: string; category: string; image: string; isFavorite: boolean }> =>
   closet.map((item) => ({
     id: String(item.id),
     title: item.name || "Unnamed",
-    category: item.category || "Item",
+    category: item.category || "Uncategorized",
     image: item.image || FALLBACK_IMAGE,
+    isFavorite: !!item.isFavorite,
   }));

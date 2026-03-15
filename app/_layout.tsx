@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { View, ActivityIndicator } from "react-native";
 import { setAuthToken } from "../src/services/apiClient";
+import { RootSiblingParent } from 'react-native-root-siblings';
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -62,9 +63,11 @@ useEffect(() => {
   }
 
   return (
+    <RootSiblingParent>
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="login" />
       <Stack.Screen name="(tabs)" />
     </Stack>
+    </RootSiblingParent>
   );
 }
