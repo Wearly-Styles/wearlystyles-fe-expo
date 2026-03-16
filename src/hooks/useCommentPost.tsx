@@ -15,7 +15,6 @@ export const useCommentPost = (postId: number) => {
 
       return res?.data || res;
     } catch (err: any) {
-      console.error("[useCommentPost] error:", err);
       setError(err.message || "Something went wrong");
       return null;
     } finally {

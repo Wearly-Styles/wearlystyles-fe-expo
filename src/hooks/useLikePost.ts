@@ -7,24 +7,13 @@ export const useLikePost = () => {
   const [error, setError] = useState<string | null>(null);
 
   const handleLikePost = async (postId: number) => {
-
     setLoading(true);
     setError(null);
-
-    console.log("🔄 handleLikePost called with:", postId);
-
     try {
-
       const result = await likePost(postId);
-
-      console.log("✅ handleLikePost result:", result);
-
-      return result;   // ⭐ QUAN TRỌNG
+      return result; 
 
     } catch (err: any) {
-
-      console.log("❌ handleLikePost error:", err);
-
       setError(err.message || "Something went wrong");
 
       return null;

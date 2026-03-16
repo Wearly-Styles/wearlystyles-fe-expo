@@ -93,15 +93,9 @@ export const deletePost = async (postId: number) => {
 }
 
 export const likePost = async (postId: number) => {
-
-  console.log("📤 Calling LIKE API for postId:", postId);
-
   const res = await request(`/mobile/posts/${postId}/like`, {
     method: "POST",
   });
-
-  console.log("📥 LIKE API response:", res);
-
   return res;
 };
 
