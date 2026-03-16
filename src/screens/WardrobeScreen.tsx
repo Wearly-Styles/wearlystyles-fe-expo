@@ -144,7 +144,9 @@ export default function WardrobeScreen() {
               Toast.show("Item deleted successfully", {
                 duration: Toast.durations.SHORT,
                 position: Toast.positions.TOP,
-                backgroundColor: "#2E7D32",
+                backgroundColor: "#333333",
+                opacity: 0.9,
+                textColor: "#ffffff",
               });
             } catch (err) {
               showToast(
@@ -175,12 +177,14 @@ export default function WardrobeScreen() {
       await clothingApi.updateItem(Number(item.id), formData);
 
       Toast.show(newStatus ? "Added to favorites" : "Removed from favorites", {
-        duration: Toast.durations.SHORT,
+        duration: 1500,
         position: Toast.positions.TOP,
         shadow: true,
         animation: true,
         hideOnPress: true,
-        backgroundColor: newStatus ? "#2E7D32" : "#C44536",
+        backgroundColor: newStatus ? "#2E7D32" : "#212121",
+        opacity: 0.9,
+        textColor: "#ffffff",
       });
 
     } catch (err) {
@@ -189,9 +193,14 @@ export default function WardrobeScreen() {
       );
 
       Toast.show("Failed to update favorite", {
-        duration: Toast.durations.SHORT,
+        duration: 1500,
         position: Toast.positions.TOP,
         backgroundColor: "#C44536",
+        opacity: 0.9,
+        textColor: "#ffffff",
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
       });
     }
   };

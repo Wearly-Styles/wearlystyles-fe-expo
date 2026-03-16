@@ -17,6 +17,7 @@ import { useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
 import { theme } from "../constants/theme";
 import { useCreatePost } from "../hooks/useCreatePost";
+import Toast from "react-native-root-toast";
 
 type PickedImage = {
   uri: string;
@@ -44,10 +45,10 @@ export default function CreatePostScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          quality: 0.7,
-        });
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+    });
     if (result.canceled || !result.assets?.[0]) return;
 
     const asset = result.assets[0];
@@ -58,13 +59,24 @@ export default function CreatePostScreen() {
     });
   };
 
-const handleSubmit = async () => {
-  const res = await handleCreatePost(caption, image, status);
+  const handleSubmit = async () => {
+    const res = await handleCreatePost(caption, image, status);
 
-  if (res) {
-    router.replace("/(tabs)/explore");
-  }
-};
+    Toast.show("Post created successfully!", {
+      duration: Toast.durations.SHORT,
+      position: Toast.positions.TOP,
+      shadow: true,
+      animation: true,
+      hideOnPress: true,
+      backgroundColor: "#2E7D32",
+      opacity: 0.9,
+      textColor: "#ffffff",
+    });
+
+    if (res) {
+      router.replace("/(tabs)/explore");
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
