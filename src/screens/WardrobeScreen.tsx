@@ -25,6 +25,7 @@ import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
+import Toast from "react-native-root-toast";
 
 type WardrobeItem = {
   id: string;
@@ -140,7 +141,11 @@ export default function WardrobeScreen() {
             try {
               await clothingApi.deleteItem(numericId);
               setItems((prev) => prev.filter((item) => item.id !== itemId));
-              showToast("success", "Item deleted.");
+              Toast.show("Item deleted successfully", {
+                duration: Toast.durations.SHORT,
+                position: Toast.positions.TOP,
+                backgroundColor: "#2E7D32",
+              });
             } catch (err) {
               showToast(
                 "error",
@@ -154,6 +159,41 @@ export default function WardrobeScreen() {
       ],
       { cancelable: true },
     );
+  };
+
+  const handleToggleFavorite = async (item: WardrobeItem) => {
+    try {
+      const newStatus = !item.isFavorite;
+
+      setItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, isFavorite: newStatus } : i))
+      );
+
+      const formData = new FormData();
+      formData.append("isFavorite", String(newStatus));
+
+      await clothingApi.updateItem(Number(item.id), formData);
+
+      Toast.show(newStatus ? "Added to favorites" : "Removed from favorites", {
+        duration: Toast.durations.SHORT,
+        position: Toast.positions.TOP,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+        backgroundColor: newStatus ? "#2E7D32" : "#C44536",
+      });
+
+    } catch (err) {
+      setItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !item.isFavorite } : i))
+      );
+
+      Toast.show("Failed to update favorite", {
+        duration: Toast.durations.SHORT,
+        position: Toast.positions.TOP,
+        backgroundColor: "#C44536",
+      });
+    }
   };
 
   const handleViewDetail = (item: WardrobeItem) => {
@@ -338,11 +378,19 @@ export default function WardrobeScreen() {
                     style={styles.cardImage}
                   />
 
-                  {item.isFavorite && (
-                    <View style={styles.favoriteBadge}>
-                      <Ionicons name="star" size={14} color="#FFD700" />
-                    </View>
-                  )}
+                  <TouchableOpacity
+                    style={styles.favoriteButton}
+                    onPress={(e) => {
+                      e.stopPropagation(); // Ngăn việc nhảy vào màn hình Detail
+                      handleToggleFavorite(item);
+                    }}
+                  >
+                    <Ionicons
+                      name={item.isFavorite ? "star" : "star-outline"}
+                      size={18}
+                      color={item.isFavorite ? "#FFD700" : "#FFF"}
+                    />
+                  </TouchableOpacity>
 
                   <TouchableOpacity
                     style={styles.deleteButton}
@@ -622,16 +670,18 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 130,
   },
-  favoriteBadge: {
+  favoriteButton: {
     position: "absolute",
     top: 10,
     left: 10,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(0,0,0,0.4)",
     padding: 6,
     borderRadius: theme.radius.pill,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
   deleteButton: {
     position: "absolute",
