@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
+import Toast from "react-native-root-toast";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -44,7 +45,7 @@ export default function EditProfileScreen() {
           : "",
       );
       setLocation(p?.location || "");
-      setBio(p?.preferences  || "");
+      setBio(p?.preferences || "");
       setAvatar(p?.avatar || null);
     }
   }, [profile]);
@@ -80,12 +81,32 @@ export default function EditProfileScreen() {
         file,
       });
 
+      Toast.show("Profile updated successfully!", {
+        duration: 1500,
+        position: Toast.positions.TOP,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+        backgroundColor: "#2E7D32",
+        opacity: 0.9,
+        textColor: "#ffffff",
+      });
+
       if (res) router.replace("/(tabs)/profile");
 
       await refetch();
-      Alert.alert("Success", "Profile updated successfully");
     } catch (err) {
       console.error("Update error:", err);
+      Toast.show("Failed to update profile.", {
+        duration: 1500,
+        position: Toast.positions.TOP,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+        backgroundColor: "#C62828",
+        opacity: 0.9,
+        textColor: "#ffffff",
+      });
     }
   };
   if (loading)

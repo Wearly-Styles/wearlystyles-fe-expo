@@ -12,6 +12,7 @@ import {
 import { useDeletePost } from "../hooks/useDeletePost";
 import { useLikePost } from "../hooks/useLikePost";
 import { useState, useEffect } from "react";
+import Toast from "react-native-root-toast";
 
 interface Comment {
   id: number;
@@ -73,16 +74,34 @@ export default function PostCard({ post, onDelete }: Props) {
     try {
       const res = await handleDeletePost(post.id);
       if (res) {
+        Toast.show("Post deleted successfully", {
+          duration: 1500,
+          position: Toast.positions.TOP,
+          shadow: true,
+          animation: true,
+          hideOnPress: true,
+          backgroundColor: "#333333",
+          opacity: 0.9,
+          textColor: "#ffffff",
+        });
         if (onDelete) {
           onDelete(post.id);
         } else {
           router.replace("/(tabs)/explore");
         }
 
-        Alert.alert("Success", "Post deleted successfully");
       }
     } catch (err) {
-      Alert.alert("Error", "Failed to delete post");
+      Toast.show("Failed to delete post", {
+        duration: 1500,
+        position: Toast.positions.TOP,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+        backgroundColor: "#C62828",
+        opacity: 0.9,
+        textColor: "#ffffff",
+      });
     }
   };
 

@@ -153,12 +153,13 @@ export default function UpdateClothingItemScreen() {
             setNewCategory("");
 
             Toast.show("Category added successfully!", {
-                duration: Toast.durations.SHORT,
+                duration: 1000,
                 position: Toast.positions.TOP,
                 shadow: true,
                 animation: true,
                 hideOnPress: true,
                 backgroundColor: "#2E7D32",
+                opacity: 0.9,
                 textColor: "#ffffff",
             });
 
@@ -187,9 +188,10 @@ export default function UpdateClothingItemScreen() {
                             }
 
                             Toast.show(`Deleted "${categoryName}"`, {
-                                duration: Toast.durations.SHORT,
+                                duration: 1500,
                                 position: Toast.positions.TOP,
-                                backgroundColor: "#C44536",
+                                backgroundColor: "#212121",
+                                opacity: 0.9,
                                 textColor: "#ffffff",
                                 shadow: true,
                                 animation: true,
@@ -200,7 +202,11 @@ export default function UpdateClothingItemScreen() {
                             Toast.show("Failed to delete category", {
                                 duration: Toast.durations.SHORT,
                                 position: Toast.positions.TOP,
-                                backgroundColor: "#333",
+                                backgroundColor: "#C62828",
+                                opacity: 0.9,
+                                textColor: "#ffffff",
+                                shadow: true,
+                                animation: true,
                             });
                         }
                     }
@@ -241,9 +247,10 @@ export default function UpdateClothingItemScreen() {
             await clothingApi.updateItem(Number(id), form);
 
             Toast.show("Update successfully!", {
-                duration: Toast.durations.SHORT,
+                duration: 1500,
                 position: Toast.positions.TOP,
                 backgroundColor: "#2E7D32",
+                opacity: 0.9,
                 textColor: "#ffffff",
                 shadow: true,
                 animation: true,
