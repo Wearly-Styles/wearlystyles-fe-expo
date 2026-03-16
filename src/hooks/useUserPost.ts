@@ -13,7 +13,6 @@ export const useUserPosts = (page: number = 1, limit: number = 20) => {
       setPosts(data);
       setError(null);
     } catch (err: any) {
-      console.error("[useUserPosts] error fetching posts:", err);
       setPosts([]);
       setError(err.message || "Something went wrong");
     } finally {
