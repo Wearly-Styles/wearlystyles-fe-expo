@@ -10,6 +10,7 @@ export const updateProfile = async (data: {
   dateOfBirth?: string;
   location?: string;
   bio?: string;
+  preferences?: string;
   gender?: string;
   file?: any;
 }) => {
@@ -19,7 +20,10 @@ export const updateProfile = async (data: {
   if (data.email) formData.append("email", data.email);
   if (data.dateOfBirth) formData.append("dateOfBirth", data.dateOfBirth);
   if (data.location) formData.append("location", data.location);
-  if (data.bio  ) formData.append("bio", data.bio);
+
+  // map bio -> preferences
+  if (data.bio) formData.append("preferences", data.bio);
+
   if (data.gender) formData.append("gender", data.gender);
 
   if (data.file) {

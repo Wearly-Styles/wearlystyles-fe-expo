@@ -52,57 +52,26 @@ export default function PostCard({ post, onDelete }: Props) {
   const [liked, setLiked] = useState(post.liked ?? false);
   const [likes, setLikes] = useState(post.likes);
 
-  /* ---------------- DEBUG RENDER ---------------- */
-
-  useEffect(() => {
-    console.log("🧩 PostCard render");
-
-    console.log("PostId:", post.id);
-    console.log("Server likes:", post.likes);
-    console.log("Local likes:", likes);
-    console.log("Liked state:", liked);
-  }, [likes, liked]);
-
-  /* ---------------- SYNC SERVER DATA ---------------- */
-
   useEffect(() => {
     setLiked(post.liked ?? false);
     setLikes(post.likes);
   }, [post]);
 
-  /* ---------------- LIKE FUNCTION ---------------- */
-
   const likePostInFeed = async () => {
-    console.log("❤️ Like clicked:", post.id);
-
     const res = await handleLikePost(post.id);
-
-    console.log("📦 Result from API:", res);
-
     if (res) {
       const likedFromServer = res.liked ?? res.data?.liked;
       const likesFromServer = res.likesCount ?? res.data?.likesCount;
-
-      console.log("❤️ likedFromServer:", likedFromServer);
-      console.log("👍 likesFromServer:", likesFromServer);
-
       setLiked(likedFromServer);
       setLikes(likesFromServer);
     }
   };
 
-  /* ---------------- DELETE POST ---------------- */
-
   const handleDelete = async () => {
     setMenuVisible(false);
 
     try {
-      console.log("🗑️ Delete post:", post.id);
-
       const res = await handleDeletePost(post.id);
-
-      console.log("Delete response:", res);
-
       if (res) {
         if (onDelete) {
           onDelete(post.id);
@@ -113,8 +82,6 @@ export default function PostCard({ post, onDelete }: Props) {
         Alert.alert("Success", "Post deleted successfully");
       }
     } catch (err) {
-      console.error("Delete error:", err);
-
       Alert.alert("Error", "Failed to delete post");
     }
   };
@@ -205,10 +172,6 @@ export default function PostCard({ post, onDelete }: Props) {
         >
           <Ionicons name="chatbubble-outline" size={24} color="#333" />
           <Text style={styles.count}>{post.comments.length}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.iconRow}>
-          <Ionicons name="share-social-outline" size={24} color="#333" />
         </TouchableOpacity>
       </View>
     </View>

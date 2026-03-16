@@ -44,7 +44,7 @@ export default function EditProfileScreen() {
           : "",
       );
       setLocation(p?.location || "");
-      setBio(p?.bio || "");
+      setBio(p?.preferences  || "");
       setAvatar(p?.avatar || null);
     }
   }, [profile]);
@@ -159,7 +159,7 @@ export default function EditProfileScreen() {
             onPress={() => router.back()}
             disabled={saving}
           >
-            <Text style={styles.buttonText}>Cancel</Text>
+            <Text style={styles.cancelTextCompact}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.saveBtn, saving && { opacity: 0.6 }]}
@@ -257,7 +257,12 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     alignItems: "center",
   },
-  cancelBtn: { backgroundColor: "#E53E3E" },
+  cancelBtn: { backgroundColor: "#FCE8E6" },
   saveBtn: { backgroundColor: "#F4B400" },
   buttonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
+  cancelTextCompact: {
+    fontWeight: "bold",
+    fontSize: 16,
+    color: "#C44536",
+  },
 });

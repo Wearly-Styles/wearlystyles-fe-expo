@@ -14,7 +14,6 @@ export const useProfile = () => {
 
       setProfile(data);
     } catch (err: any) {
-      console.error("Error fetching profile:", err);
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
