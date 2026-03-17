@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { ApiError } from "../services/apiClient";
 import { deletePost } from "../services/postApi";
-import {Alert} from "react-native";
 
 export const useDeletePost = () => {
   const [loading, setLoading] = useState(false);
@@ -12,10 +12,26 @@ export const useDeletePost = () => {
 
     try {
       await deletePost(postId);
-      return true;
+
+      return {
+        success: true,
+      };
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
-      return false;
+      const statusCode = err instanceof ApiError ? err.status : undefined;
+      const message =
+        statusCode === 403
+          ? "You cannot delete this post."
+          : err?.response?.data?.message ||
+            err?.message ||
+            "Something went wrong";
+
+      setError(message);
+
+      return {
+        success: false,
+        message,
+        statusCode,
+      };
     } finally {
       setLoading(false);
     }
