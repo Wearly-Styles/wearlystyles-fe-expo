@@ -73,23 +73,24 @@ export default function PostCard({ post, onDelete }: Props) {
 
     try {
       const res = await handleDeletePost(post.id);
-      if (res) {
+
+      if (res.success) {
         Toast.show("Post deleted successfully", {
           duration: 1500,
           position: Toast.positions.TOP,
-          shadow: true,
-          animation: true,
-          hideOnPress: true,
-          backgroundColor: "#333333",
-          opacity: 0.9,
-          textColor: "#ffffff",
         });
+
         if (onDelete) {
           onDelete(post.id);
         } else {
           router.replace("/(tabs)/explore");
         }
-
+      } else {
+        Toast.show(res.message || "Failed to delete post", {
+          duration: 1500,
+          position: Toast.positions.TOP,
+          backgroundColor: "#C62828",
+        });
       }
     } catch (err) {
       Toast.show("Failed to delete post", {
