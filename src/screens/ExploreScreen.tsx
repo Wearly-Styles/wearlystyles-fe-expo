@@ -164,30 +164,6 @@ useFocusEffect(
             onBackPress={() => router.back()}
           />
 
-          {/* Filters */}
-          <View style={styles.filterWrap}>
-            <FilterPills
-              filters={filters}
-              activeIndex={activeFilter}
-              onPress={setActiveFilter}
-            />
-          </View>
-
-          {/* Outfit Section */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Trending now</Text>
-            <Text style={styles.sectionNote}>Updated daily</Text>
-          </View>
-
-          {loading && (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color={theme.colors.primaryDark} />
-              <Text style={styles.loadingText}>Loading outfits...</Text>
-            </View>
-          )}
-
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
           {/* Auth Required */}
           {requiresAuth && (
             <View style={styles.authCard}>
@@ -217,15 +193,6 @@ useFocusEffect(
               </TouchableOpacity>
             </View>
           )}
-
-          {/* Outfit Cards */}
-          {apiOutfits.map((outfit) => (
-            <OutfitCard
-              key={outfit.id}
-              outfit={outfit}
-              onPress={() => router.push(`/outfit/${outfit.id}`)}
-            />
-          ))}
 
           {/* Community Feed */}
           <View style={styles.sectionHeader}>
