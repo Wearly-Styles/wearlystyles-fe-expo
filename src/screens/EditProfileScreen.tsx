@@ -18,6 +18,7 @@ import * as ImagePicker from "expo-image-picker";
 import AppHeader from "../components/AppHeader";
 import { useProfile } from "../hooks/useProfile";
 import { useUpdateProfile } from "../hooks/useUpdateProfile";
+import { getApiErrorMessage } from "../services/apiClient";
 import { replace } from "expo-router/build/global-state/routing";
 
 export default function EditProfileScreen() {
@@ -97,7 +98,8 @@ export default function EditProfileScreen() {
       await refetch();
     } catch (err) {
       console.error("Update error:", err);
-      Toast.show("Failed to update profile.", {
+      const message = getApiErrorMessage(err);
+      Toast.show(message, {
         duration: 1500,
         position: Toast.positions.TOP,
         shadow: true,

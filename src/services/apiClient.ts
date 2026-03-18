@@ -48,6 +48,23 @@ export class ApiError extends Error {
 export const isApiError = (error: unknown): error is ApiError =>
   error instanceof ApiError;
 
+export const getApiErrorMessage = (error: unknown): string => {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as any).message === "string"
+  ) {
+    return (error as any).message;
+  }
+
+  return "An unexpected error occurred";
+};
+
 type RequestOptions = RequestInit & {
   skipAuth?: boolean;
   skipRefresh?: boolean;
