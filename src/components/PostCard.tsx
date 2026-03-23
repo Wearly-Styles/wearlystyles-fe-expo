@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import {
-  Alert,
   Image,
   Modal,
   StyleSheet,
@@ -12,7 +11,7 @@ import {
 import { useDeletePost } from "../hooks/useDeletePost";
 import { useLikePost } from "../hooks/useLikePost";
 import { useState, useEffect } from "react";
-import Toast from "react-native-root-toast";
+import { showErrorToast, showInfoToast } from "../utils/toast";
 
 interface Comment {
   id: number;
@@ -75,9 +74,8 @@ export default function PostCard({ post, onDelete }: Props) {
       const res = await handleDeletePost(post.id);
 
       if (res.success) {
-        Toast.show("Post deleted successfully", {
-          duration: 1500,
-          position: Toast.positions.TOP,
+        showInfoToast("The post was removed.", {
+          title: "Post deleted",
         });
 
         if (onDelete) {
@@ -86,22 +84,13 @@ export default function PostCard({ post, onDelete }: Props) {
           router.replace("/(tabs)/explore");
         }
       } else {
-        Toast.show(res.message || "Failed to delete post", {
-          duration: 1500,
-          position: Toast.positions.TOP,
-          backgroundColor: "#C62828",
+        showErrorToast(res.message || "We couldn't delete this post.", {
+          title: "Post not deleted",
         });
       }
-    } catch (err) {
-      Toast.show("Failed to delete post", {
-        duration: 1500,
-        position: Toast.positions.TOP,
-        shadow: true,
-        animation: true,
-        hideOnPress: true,
-        backgroundColor: "#C62828",
-        opacity: 0.9,
-        textColor: "#ffffff",
+    } catch {
+      showErrorToast("We couldn't delete this post.", {
+        title: "Post not deleted",
       });
     }
   };

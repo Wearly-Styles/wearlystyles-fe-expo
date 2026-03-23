@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -17,7 +16,7 @@ import { useRouter } from "expo-router";
 import AppHeader from "../components/AppHeader";
 import { theme } from "../constants/theme";
 import { useCreatePost } from "../hooks/useCreatePost";
-import Toast from "react-native-root-toast";
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 
 type PickedImage = {
   uri: string;
@@ -37,10 +36,11 @@ export default function CreatePostScreen() {
   const { loading, error, handleCreatePost } = useCreatePost();
 
   const handlePickImage = async () => {
-
     const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!granted) {
-      alert("Allow photo access");
+      showErrorToast("Allow photo access to pick an image.", {
+        title: "Permission needed",
+      });
       return;
     }
 
@@ -60,21 +60,21 @@ export default function CreatePostScreen() {
   };
 
   const handleSubmit = async () => {
-    const res = await handleCreatePost(caption, image, status);
+    try {
+      const res = await handleCreatePost(caption, image, status);
+      if (!res) {
+        throw new Error("We couldn't publish your post.");
+      }
 
-    Toast.show("Post created successfully!", {
-      duration: Toast.durations.SHORT,
-      position: Toast.positions.TOP,
-      shadow: true,
-      animation: true,
-      hideOnPress: true,
-      backgroundColor: "#2E7D32",
-      opacity: 0.9,
-      textColor: "#ffffff",
-    });
-
-    if (res) {
+      showSuccessToast("Your post is now live on Explore.", {
+        title: "Post published",
+      });
       router.replace("/(tabs)/explore");
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error ? err.message : "We couldn't publish your post.",
+        { title: "Post not published" },
+      );
     }
   };
 

@@ -25,7 +25,7 @@ import { theme } from "../constants/theme";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import { clothingApi, contextApi } from "../services/outfitApi";
 import { mapClosetToWardrobe } from "../utils/outfitMapper";
-import Toast from "react-native-root-toast";
+import { showErrorToast, showInfoToast, showSuccessToast } from "../utils/toast";
 
 type WardrobeItem = {
   id: string;
@@ -56,10 +56,6 @@ export default function WardrobeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const currentFilterLabel = filters[activeFilter] || filters[0] || "All";
   const visibleItems = useMemo(() => {
@@ -117,15 +113,12 @@ export default function WardrobeScreen() {
     };
   }, []);
 
-  const showToast = (type: "success" | "error", message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 2500);
-  };
-
   const handleDelete = (itemId: string) => {
     const numericId = Number(itemId);
     if (!Number.isFinite(numericId)) {
-      showToast("error", "Invalid item id.");
+      showErrorToast("This item can't be deleted right now.", {
+        title: "Invalid item",
+      });
       return;
     }
     Alert.alert(
@@ -141,17 +134,15 @@ export default function WardrobeScreen() {
             try {
               await clothingApi.deleteItem(numericId);
               setItems((prev) => prev.filter((item) => item.id !== itemId));
-              Toast.show("Item deleted successfully", {
-                duration: Toast.durations.SHORT,
-                position: Toast.positions.TOP,
-                backgroundColor: "#333333",
-                opacity: 0.9,
-                textColor: "#ffffff",
+              showInfoToast("The item was removed from your wardrobe.", {
+                title: "Item deleted",
               });
             } catch (err) {
-              showToast(
-                "error",
-                err instanceof Error ? err.message : "Delete failed.",
+              showErrorToast(
+                err instanceof Error
+                  ? err.message
+                  : "We couldn't delete this item.",
+                { title: "Item not deleted" },
               );
             } finally {
               setDeletingId(null);
@@ -175,32 +166,23 @@ export default function WardrobeScreen() {
       formData.append("isFavorite", String(newStatus));
 
       await clothingApi.updateItem(Number(item.id), formData);
+      if (newStatus) {
+        showSuccessToast("This item is now in your favorites.", {
+          title: "Added to favorites",
+        });
+      } else {
+        showInfoToast("This item was removed from your favorites.", {
+          title: "Removed from favorites",
+        });
+      }
 
-      Toast.show(newStatus ? "Added to favorites" : "Removed from favorites", {
-        duration: 1500,
-        position: Toast.positions.TOP,
-        shadow: true,
-        animation: true,
-        hideOnPress: true,
-        backgroundColor: newStatus ? "#2E7D32" : "#212121",
-        opacity: 0.9,
-        textColor: "#ffffff",
-      });
-
-    } catch (err) {
+    } catch {
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, isFavorite: !item.isFavorite } : i))
       );
 
-      Toast.show("Failed to update favorite", {
-        duration: 1500,
-        position: Toast.positions.TOP,
-        backgroundColor: "#C44536",
-        opacity: 0.9,
-        textColor: "#ffffff",
-        shadow: true,
-        animation: true,
-        hideOnPress: true,
+      showErrorToast("We couldn't update favorites for this item.", {
+        title: "Favorite not updated",
       });
     }
   };
@@ -347,18 +329,6 @@ export default function WardrobeScreen() {
             </View>
           ) : error ? (
             <Text style={styles.errorText}>{error}</Text>
-          ) : null}
-          {toast ? (
-            <View
-              style={[
-                styles.toast,
-                toast.type === "success"
-                  ? styles.toastSuccess
-                  : styles.toastError,
-              ]}
-            >
-              <Text style={styles.toastText}>{toast.message}</Text>
-            </View>
           ) : null}
           {requiresAuth ? (
             <View style={styles.authCard}>
@@ -637,24 +607,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: theme.colors.text,
-  },
-  toast: {
-    marginHorizontal: theme.spacing.lg,
-    marginTop: theme.spacing.sm,
-    paddingVertical: 10,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
-  },
-  toastSuccess: {
-    backgroundColor: "#E7F6EC",
-  },
-  toastError: {
-    backgroundColor: "#FCE8E6",
-  },
-  toastText: {
-    fontSize: 12,
-    color: theme.colors.text,
-    fontWeight: "600",
   },
   grid: {
     flexDirection: "row",

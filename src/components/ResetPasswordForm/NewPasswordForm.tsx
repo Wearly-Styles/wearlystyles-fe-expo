@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons'; // Import icon
+import { showErrorToast } from '../../utils/toast';
 
 export default function NewPasswordForm({ onComplete, isLoading }: any) {
   const [password, setPassword] = useState('');
@@ -11,11 +12,17 @@ export default function NewPasswordForm({ onComplete, isLoading }: any) {
 
   const handleUpdate = () => {
     if (password.length < 6) {
-      return Alert.alert("Failed", "Password must be at least 6 characters long");
+      showErrorToast("Password must be at least 6 characters.", {
+        title: "Password too short",
+      });
+      return;
     }
 
     if (password !== confirmPassword) {
-      return Alert.alert("Failed", "The confirmed password does not match the new password. Please try again.");
+      showErrorToast("Confirmation does not match the new password.", {
+        title: "Passwords do not match",
+      });
+      return;
     }
 
     onComplete(password);

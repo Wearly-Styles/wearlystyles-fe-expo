@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,11 @@ import { getAuthToken, isApiError } from "../services/apiClient";
 import { contextApi, recommendationApi, outfitApi } from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
+import {
+  showErrorToast,
+  showInfoToast,
+  showSuccessToast,
+} from "../utils/toast";
 import {
   addScheduleDays,
   atScheduleNoon,
@@ -88,21 +93,34 @@ export default function OutfitSelectionScreen() {
     [personalScheduleEntries, selectedDateValue],
   );
 
-  const showNotice = (title: string, message: string) => {
-    Alert.alert(title, message);
+  const showNotice = (
+    tone: "success" | "error" | "info",
+    title: string,
+    message: string,
+  ) => {
+    const options = { title };
+    if (tone === "success") {
+      showSuccessToast(message, options);
+      return;
+    }
+    if (tone === "info") {
+      showInfoToast(message, options);
+      return;
+    }
+    showErrorToast(message, options);
   };
 
   const showAuthRequired = (message: string) => {
     Alert.alert("Sign in required", message, [
-      { text: "Cancel", style: "cancel" },
+      { text: "Not now", style: "cancel" },
       { text: "Go to login", onPress: () => router.replace("/login") },
     ]);
   };
 
   const showClosetRequired = (message: string) => {
     Alert.alert("Wardrobe required", message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
+      { text: "Not now", style: "cancel" },
+      { text: "Open wardrobe", onPress: () => router.push("/wardrobe") },
     ]);
   };
   const getLocalOutfitId = (outfit: Outfit) => String(outfit.id);
@@ -165,7 +183,7 @@ export default function OutfitSelectionScreen() {
     setLoading(true);
     const token = getAuthToken();
     if (!token) {
-      showAuthRequired("Please sign in to generate outfit suggestions.");
+      showAuthRequired("Sign in to generate outfit ideas.");
       setLoading(false);
       return;
     }
@@ -178,7 +196,9 @@ export default function OutfitSelectionScreen() {
       });
       const closet = await contextApi.getCloset();
       if (!closet.length) {
-        showClosetRequired("Add items to your closet before generating outfits.");
+        showClosetRequired(
+          "Add at least one wardrobe item before generating looks.",
+        );
         setLoading(false);
         return;
       }
@@ -198,13 +218,16 @@ export default function OutfitSelectionScreen() {
       setWeatherLoaded(true);
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
-        showAuthRequired("Please sign in to generate outfit suggestions.");
+        showAuthRequired("Sign in to generate outfit ideas.");
       } else if (isApiError(err) && err.status === 400 && err.message.includes("Closet")) {
-        showClosetRequired("Add items to your closet before generating outfits.");
+        showClosetRequired(
+          "Add at least one wardrobe item before generating looks.",
+        );
       } else {
         showNotice(
-          "Unable to generate outfit",
-          err instanceof Error ? err.message : "Failed to generate outfit",
+          "error",
+          "Couldn't generate looks",
+          err instanceof Error ? err.message : "Try again in a moment.",
         );
       }
       setOutfits([]);
@@ -215,14 +238,18 @@ export default function OutfitSelectionScreen() {
 
   const handleApprove = async (outfit: Outfit) => {
     if (!getAuthToken()) {
-      showAuthRequired("Please sign in to approve outfits.");
+      showAuthRequired("Sign in to save this look.");
       return;
     }
     const items = (outfit.items || [])
       .map((item) => Number(String(item.id).split("-")[0]))
       .filter((id) => Number.isFinite(id));
     if (!items.length) {
-      showNotice("Unable to save outfit", "No closet items to save this outfit.");
+      showNotice(
+        "info",
+        "Can't save this look",
+        "This suggestion doesn't include wardrobe items yet.",
+      );
       return;
     }
 
@@ -236,15 +263,24 @@ export default function OutfitSelectionScreen() {
         items,
       });
       if (!saved?.id) {
-        showNotice("Unable to save outfit", "Save failed: missing outfit id.");
+        showNotice(
+          "error",
+          "Couldn't save this look",
+          "The saved look did not return an ID. Try again.",
+        );
         return;
       }
       setSavedOutfitIds((prev) => ({ ...prev, [localId]: saved.id }));
-      showNotice("Outfit approved", "Saved to your outfits. You can cancel approval later.");
+      showNotice(
+        "success",
+        "Look saved",
+        "This suggestion is now in Your Outfits.",
+      );
     } catch (err) {
       showNotice(
-        "Unable to save outfit",
-        err instanceof Error ? err.message : "Failed to save outfit.",
+        "error",
+        "Couldn't save this look",
+        err instanceof Error ? err.message : "Try saving this look again.",
       );
     } finally {
       setPendingOutfitAction((prev) =>
@@ -259,12 +295,12 @@ export default function OutfitSelectionScreen() {
     if (!savedId) return;
 
     Alert.alert(
-      "Cancel approval",
-      "Remove this saved outfit from your approved outfits?",
+      "Remove saved look",
+      "Remove this look from Your Outfits?",
       [
         { text: "Keep", style: "cancel" },
         {
-          text: "Cancel approval",
+          text: "Remove",
           style: "destructive",
           onPress: async () => {
             setPendingOutfitAction({ id: localId, type: "cancel" });
@@ -275,11 +311,16 @@ export default function OutfitSelectionScreen() {
                 delete next[localId];
                 return next;
               });
-              showNotice("Approval cancelled", "This outfit is no longer saved.");
+              showNotice(
+                "info",
+                "Saved look removed",
+                "This look is no longer in Your Outfits.",
+              );
             } catch (err) {
               showNotice(
-                "Unable to cancel approval",
-                err instanceof Error ? err.message : "Failed to cancel approval.",
+                "error",
+                "Couldn't remove saved look",
+                err instanceof Error ? err.message : "Try removing it again.",
               );
             } finally {
               setPendingOutfitAction((prev) =>
@@ -311,12 +352,12 @@ export default function OutfitSelectionScreen() {
   const handleDismissGenerated = (outfit: Outfit) => {
     const localId = getLocalOutfitId(outfit);
     Alert.alert(
-      "Cancel outfit",
-      "Remove this generated outfit from the current suggestions?",
+      "Remove suggestion",
+      "Remove this generated look from the current suggestions?",
       [
         { text: "Keep", style: "cancel" },
         {
-          text: "Cancel outfit",
+          text: "Remove",
           style: "destructive",
           onPress: () => {
             setDismissingOutfitId(localId);
@@ -513,6 +554,21 @@ export default function OutfitSelectionScreen() {
                       <View style={styles.generatedActionRow}>
                         <TouchableOpacity
                           style={[
+                            styles.cancelButtonCompact,
+                            styles.generatedActionButton,
+                            isDismissingOutfit(outfit) && styles.buttonDisabled,
+                          ]}
+                          onPress={() => handleDismissGenerated(outfit)}
+                          disabled={Boolean(getPendingAction(outfit)) || isDismissingOutfit(outfit)}
+                        >
+                          {isDismissingOutfit(outfit) ? (
+                            <ActivityIndicator color="#C44536" />
+                          ) : (
+                            <Text style={styles.cancelTextCompact}>Cancel</Text>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
                             styles.approveButtonCompact,
                             styles.generatedActionButton,
                             getPendingAction(outfit) === "approve" &&
@@ -527,27 +583,9 @@ export default function OutfitSelectionScreen() {
                             <Text style={styles.approveTextCompact}>Approve</Text>
                           )}
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[
-                            styles.cancelButtonCompact,
-                            styles.generatedActionButton,
-                            isDismissingOutfit(outfit) && styles.buttonDisabled,
-                          ]}
-                          onPress={() => handleDismissGenerated(outfit)}
-                          disabled={Boolean(getPendingAction(outfit)) || isDismissingOutfit(outfit)}
-                        >
-                          {isDismissingOutfit(outfit) ? (
-                            <ActivityIndicator color="#C44536" />
-                          ) : (
-                            <Text style={styles.cancelTextCompact}>Cancel</Text>
-                          )}
-                        </TouchableOpacity>
                       </View>
                     ) : (
                       <View style={styles.approvedRowCompact}>
-                        <View style={styles.approvedBadgeCompact}>
-                          <Text style={styles.approvedBadgeTextCompact}>Approved</Text>
-                        </View>
                         <TouchableOpacity
                           style={[
                             styles.cancelButtonCompact,
@@ -563,6 +601,9 @@ export default function OutfitSelectionScreen() {
                             <Text style={styles.cancelTextCompact}>Cancel</Text>
                           )}
                         </TouchableOpacity>
+                        <View style={styles.approvedBadgeCompact}>
+                          <Text style={styles.approvedBadgeTextCompact}>Approved</Text>
+                        </View>
                       </View>
                     )}
                   </View>
