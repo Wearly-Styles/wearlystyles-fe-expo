@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { updateProfile } from "../services/profileApi";
+import { getApiErrorMessage } from "../services/apiClient";
 
 export const useUpdateProfile = () => {
   const [loading, setLoading] = useState(false);
@@ -12,8 +13,9 @@ export const useUpdateProfile = () => {
 
       const res = await updateProfile(data);
       return res;
-    } catch (err: any) {
-      setError(err.message || "Update profile failed");
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err) || "Update profile failed";
+      setError(message);
       throw err;
     } finally {
       setLoading(false);
