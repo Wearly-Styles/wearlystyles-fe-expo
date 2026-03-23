@@ -13,13 +13,11 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Toast from "react-native-root-toast";
 import AppHeader from "../components/AppHeader";
 import { theme } from "../constants/theme";
-import { setAuthToken } from "../services/apiClient";
-import { getStoredToken } from "../services/authStore";
 import { clothingApi } from "../services/outfitApi";
 import type { Category } from "../services/types";
+import { showErrorToast, showInfoToast, showSuccessToast } from "../utils/toast";
 
 type PickedImage = {
     uri: string;
@@ -121,7 +119,12 @@ export default function UpdateClothingItemScreen() {
 
     const handlePickImage = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permission.granted) return;
+        if (!permission.granted) {
+            showInfoToast("Allow photo access to change this item image.", {
+                title: "Permission needed",
+            });
+            return;
+        }
 
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -139,7 +142,12 @@ export default function UpdateClothingItemScreen() {
     };
 
     const handleCreateCategory = async () => {
-        if (!newCategory.trim()) return;
+        if (!newCategory.trim()) {
+            showInfoToast("Enter a category name first.", {
+                title: "Category name required",
+            });
+            return;
+        }
 
         try {
             const created = await clothingApi.createCategory({
@@ -151,27 +159,21 @@ export default function UpdateClothingItemScreen() {
             );
             setSelectedCategoryId(created.id);
             setNewCategory("");
-
-            Toast.show("Category added successfully!", {
-                duration: 1000,
-                position: Toast.positions.TOP,
-                shadow: true,
-                animation: true,
-                hideOnPress: true,
-                backgroundColor: "#2E7D32",
-                opacity: 0.9,
-                textColor: "#ffffff",
+            showSuccessToast(`"${created.name}" is ready to use.`, {
+                title: "Category added",
             });
-
         } catch {
-            setError("Failed to create category.");
+            setError("We couldn't create that category.");
+            showErrorToast("We couldn't create that category.", {
+                title: "Category not added",
+            });
         }
     };
 
     const handleDeleteCategory = (categoryId: number, categoryName: string) => {
         Alert.alert(
-            "Delete Category",
-            `Are you sure you want to delete "${categoryName}"?`,
+            "Delete category",
+            `Delete "${categoryName}" from your categories?`,
             [
                 { text: "Cancel", style: "cancel" },
                 {
@@ -186,27 +188,17 @@ export default function UpdateClothingItemScreen() {
                             if (selectedCategoryId === categoryId) {
                                 setSelectedCategoryId(null);
                             }
-
-                            Toast.show(`Deleted "${categoryName}"`, {
-                                duration: 1500,
-                                position: Toast.positions.TOP,
-                                backgroundColor: "#212121",
-                                opacity: 0.9,
-                                textColor: "#ffffff",
-                                shadow: true,
-                                animation: true,
+                            showInfoToast(`"${categoryName}" was removed.`, {
+                                title: "Category deleted",
                             });
-
                         } catch (err: any) {
                             console.error("Delete category error:", err);
-                            Toast.show("Failed to delete category", {
-                                duration: Toast.durations.SHORT,
-                                position: Toast.positions.TOP,
-                                backgroundColor: "#C62828",
-                                opacity: 0.9,
-                                textColor: "#ffffff",
-                                shadow: true,
-                                animation: true,
+                            const message =
+                                err instanceof Error
+                                    ? err.message
+                                    : "We couldn't delete that category.";
+                            showErrorToast(message, {
+                                title: "Category not deleted",
                             });
                         }
                     }
@@ -243,17 +235,9 @@ export default function UpdateClothingItemScreen() {
                 form.append("categoryId", String(selectedCategoryId));
             }
 
-            console.log("🚀 Đang gửi Update...");
             await clothingApi.updateItem(Number(id), form);
-
-            Toast.show("Update successfully!", {
-                duration: 1500,
-                position: Toast.positions.TOP,
-                backgroundColor: "#2E7D32",
-                opacity: 0.9,
-                textColor: "#ffffff",
-                shadow: true,
-                animation: true,
+            showSuccessToast("Item details were updated.", {
+                title: "Wardrobe item updated",
             });
             setTimeout(() => {
                 router.replace("/wardrobe");
@@ -261,7 +245,12 @@ export default function UpdateClothingItemScreen() {
 
         } catch (err: any) {
             console.error("Update error:", err);
-            setError(err.response?.data?.message || "Update failed.");
+            const message =
+                err.response?.data?.message || "We couldn't update this item.";
+            setError(message);
+            showErrorToast(message, {
+                title: "Wardrobe item not updated",
+            });
         } finally {
             setLoading(false);
         }

@@ -25,6 +25,7 @@ import {
   formatPersonalScheduleTime,
   savePersonalScheduleEntries,
 } from "../utils/personalSchedule";
+import { showErrorToast, showInfoToast, showSuccessToast } from "../utils/toast";
 
 type PersonalScheduleForm = {
   title: string;
@@ -144,15 +145,21 @@ export default function PersonalScheduleScreen() {
 
   const handleSave = async () => {
     if (!form.title.trim()) {
-      Alert.alert("Missing title", "Enter a title for this routine.");
+      showErrorToast("Enter a short name for this routine.", {
+        title: "Routine name required",
+      });
       return;
     }
     if (!form.daysOfWeek.length) {
-      Alert.alert("Missing days", "Select at least one day.");
+      showErrorToast("Choose at least one repeat day.", {
+        title: "Select a day",
+      });
       return;
     }
     if (!isValidTime(form.startTime) || !isValidTime(form.endTime)) {
-      Alert.alert("Invalid time", "Use HH:MM format, for example 08:30.");
+      showErrorToast("Use HH:MM format, for example 08:30.", {
+        title: "Time format invalid",
+      });
       return;
     }
 
@@ -179,9 +186,11 @@ export default function PersonalScheduleScreen() {
       setEntries(saved);
       resetForm();
       setIsComposerOpen(false);
-      Alert.alert(
-        editingId ? "Schedule updated" : "Schedule saved",
-        "AI will use this routine in outfit suggestions.",
+      showSuccessToast(
+        editingId
+          ? "AI will use the updated routine in future suggestions."
+          : "AI can now use this routine in future suggestions.",
+        { title: editingId ? "Routine updated" : "Routine saved" },
       );
     } finally {
       setSaving(false);
@@ -204,20 +213,29 @@ export default function PersonalScheduleScreen() {
   };
 
   const handleDelete = (entryId: string) => {
-    Alert.alert("Delete routine", "Remove this personal routine?", [
+    Alert.alert("Delete routine", "Remove this routine from your weekly plan?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const nextEntries = entries.filter((entry) => entry.id !== entryId);
-          const saved = await savePersonalScheduleEntries(nextEntries);
-          setEntries(saved);
-          if (editingId === entryId) {
-            resetForm();
-          }
-          if (!saved.length) {
-            setIsComposerOpen(true);
+          try {
+            const nextEntries = entries.filter((entry) => entry.id !== entryId);
+            const saved = await savePersonalScheduleEntries(nextEntries);
+            setEntries(saved);
+            if (editingId === entryId) {
+              resetForm();
+            }
+            if (!saved.length) {
+              setIsComposerOpen(true);
+            }
+            showInfoToast("This routine was removed from your weekly plan.", {
+              title: "Routine deleted",
+            });
+          } catch {
+            showErrorToast("We couldn't remove this routine.", {
+              title: "Routine not deleted",
+            });
           }
         },
       },

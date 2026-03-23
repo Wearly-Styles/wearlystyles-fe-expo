@@ -8,9 +8,7 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from "react-native";
-import Toast from "react-native-root-toast";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -18,7 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import AppHeader from "../components/AppHeader";
 import { useProfile } from "../hooks/useProfile";
 import { useUpdateProfile } from "../hooks/useUpdateProfile";
-import { replace } from "expo-router/build/global-state/routing";
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -52,7 +50,12 @@ export default function EditProfileScreen() {
 
   const pickImage = async () => {
     const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!granted) return alert("Please allow access to photo library");
+    if (!granted) {
+      showErrorToast("Allow photo access to change your avatar.", {
+        title: "Permission needed",
+      });
+      return;
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -81,32 +84,24 @@ export default function EditProfileScreen() {
         file,
       });
 
-      Toast.show("Profile updated successfully!", {
-        duration: 1500,
-        position: Toast.positions.TOP,
-        shadow: true,
-        animation: true,
-        hideOnPress: true,
-        backgroundColor: "#2E7D32",
-        opacity: 0.9,
-        textColor: "#ffffff",
-      });
-
-      if (res) router.replace("/(tabs)/profile");
+      if (!res) {
+        showErrorToast("We couldn't save your profile.", {
+          title: "Profile not updated",
+        });
+        return;
+      }
 
       await refetch();
+      showSuccessToast("Your changes are now saved.", {
+        title: "Profile updated",
+      });
+      router.replace("/(tabs)/profile");
     } catch (err) {
       console.error("Update error:", err);
-      Toast.show("Failed to update profile.", {
-        duration: 1500,
-        position: Toast.positions.TOP,
-        shadow: true,
-        animation: true,
-        hideOnPress: true,
-        backgroundColor: "#C62828",
-        opacity: 0.9,
-        textColor: "#ffffff",
-      });
+      showErrorToast(
+        err instanceof Error ? err.message : "We couldn't save your profile.",
+        { title: "Profile not updated" },
+      );
     }
   };
   if (loading)

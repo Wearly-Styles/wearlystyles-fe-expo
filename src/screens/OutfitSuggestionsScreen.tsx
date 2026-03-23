@@ -27,6 +27,11 @@ import {
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
 import { setOutfitCache } from "../utils/outfitStore";
 import {
+  showErrorToast,
+  showInfoToast,
+  showSuccessToast,
+} from "../utils/toast";
+import {
   getPersonalScheduleEntriesForDate,
   toPersonalScheduleEvents,
   toPersonalSchedulePreferences,
@@ -261,21 +266,34 @@ export default function OutfitSuggestionsScreen() {
     calendarMonth.getFullYear() === getTodayDate().getFullYear() &&
     calendarMonth.getMonth() === getTodayDate().getMonth();
 
-  const showNotice = (title: string, message: string) => {
-    Alert.alert(title, message);
+  const showNotice = (
+    tone: "success" | "error" | "info",
+    title: string,
+    message: string,
+  ) => {
+    const options = { title };
+    if (tone === "success") {
+      showSuccessToast(message, options);
+      return;
+    }
+    if (tone === "info") {
+      showInfoToast(message, options);
+      return;
+    }
+    showErrorToast(message, options);
   };
 
   const showAuthRequired = (message: string) => {
     Alert.alert("Sign in required", message, [
-      { text: "Cancel", style: "cancel" },
+      { text: "Not now", style: "cancel" },
       { text: "Go to login", onPress: () => router.replace("/login") },
     ]);
   };
 
   const showClosetRequired = (message: string) => {
     Alert.alert("Wardrobe required", message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Go to wardrobe", onPress: () => router.push("/wardrobe") },
+      { text: "Not now", style: "cancel" },
+      { text: "Open wardrobe", onPress: () => router.push("/wardrobe") },
     ]);
   };
 
@@ -396,7 +414,7 @@ export default function OutfitSuggestionsScreen() {
       setSelectedSlot(0);
       setIsEditing(false);
     }
-  }, [heroOutfit?.id, apiOutfits.length]);
+  }, [heroOutfit, apiOutfits.length]);
 
   // No auto-generate. User selects dates and taps Generate.
 
@@ -692,23 +710,32 @@ export default function OutfitSuggestionsScreen() {
     const generatedDateKey = getGeneratedDateKeyFromOutfitId(String(outfit.id));
     if (generatedDateKey && generatedDateKey !== dateKey) {
       showNotice(
+        "info",
         "Wrong day selected",
-        "This outfit belongs to another day. Pick the suggestion for this date before scheduling.",
+        "This suggestion belongs to another day. Pick the look shown for this date first.",
       );
       return;
     }
     if (!getAuthToken()) {
-      showAuthRequired("Please sign in to schedule outfits.");
+      showAuthRequired("Sign in to manage your outfit schedule.");
       return;
     }
 
     try {
       setLoading(true);
       await scheduleOutfitForDate(outfit, dateKey, date, existingPlanId);
+      showNotice(
+        "success",
+        existingPlanId ? "Schedule updated" : "Look scheduled",
+        existingPlanId
+          ? "This day now uses the selected look."
+          : "Added to your outfit schedule.",
+      );
     } catch (err) {
       showNotice(
-        "Unable to schedule outfit",
-        err instanceof Error ? err.message : "Failed to schedule outfit.",
+        "error",
+        "Couldn't schedule this look",
+        err instanceof Error ? err.message : "Try again in a moment.",
       );
     } finally {
       setLoading(false);
@@ -718,32 +745,36 @@ export default function OutfitSuggestionsScreen() {
   const scheduleGeneratedOutfits = async (replaceExisting: boolean) => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
+      showNotice(
+        "info",
+        "No looks to schedule",
+        "Generate looks before adding them to your schedule.",
+      );
       return;
     }
     if (!getAuthToken()) {
-      showAuthRequired("Please sign in to schedule outfits.");
+      showAuthRequired("Sign in to manage your outfit schedule.");
       return;
     }
 
     try {
       setLoading(true);
 
-      const toCreate: Array<{
+      const toCreate: {
         dateKey: string;
         outfit: Outfit;
         outfitId: number;
         planDate: string;
         planType?: string;
-      }> = [];
-      const toReplace: Array<{
+      }[] = [];
+      const toReplace: {
         dateKey: string;
         planId: number;
         outfit: Outfit;
         outfitId: number;
         planDate: string;
         planType?: string;
-      }> = [];
+      }[] = [];
 
       for (const key of keys) {
         const outfit = generatedOutfitsByDate[key];
@@ -813,21 +844,26 @@ export default function OutfitSuggestionsScreen() {
       const entries = Object.values(newEntries);
       if (!entries.length) {
         showNotice(
+          "info",
           "Nothing changed",
           replaceExisting
-            ? "No outfits were scheduled. Try generating again."
-            : "All generated days are already scheduled.",
+            ? "No looks were scheduled. Try generating again."
+            : "All selected days already have a scheduled look.",
         );
         return;
       }
 
       setScheduledOutfits((prev) => ({ ...prev, ...newEntries }));
       setOutfitCache(entries.map((entry) => entry.outfit));
-      showNotice("Schedule updated", `Scheduled ${entries.length} outfit(s).`);
+      showNotice(
+        "success",
+        "Schedule updated",
+        `Added ${entries.length} ${entries.length === 1 ? "look" : "looks"} to your schedule.`,
+      );
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to schedule outfits.";
-      showNotice("Unable to schedule outfits", message);
+        err instanceof Error ? err.message : "Try again in a moment.";
+      showNotice("error", "Couldn't update your schedule", message);
     } finally {
       setLoading(false);
     }
@@ -836,7 +872,11 @@ export default function OutfitSuggestionsScreen() {
   const handleScheduleGeneratedPress = () => {
     const keys = Object.keys(generatedOutfitsByDate).sort();
     if (keys.length === 0) {
-      showNotice("No outfits to schedule", "Generate outfits before scheduling.");
+      showNotice(
+        "info",
+        "No looks to schedule",
+        "Generate looks before adding them to your schedule.",
+      );
       return;
     }
 
@@ -846,10 +886,10 @@ export default function OutfitSuggestionsScreen() {
 
     if (existingCount === 0) {
       Alert.alert(
-        "Schedule outfits",
-        `Schedule ${total} generated outfit(s) to your calendar? This will save them to your wardrobe.`,
+        "Schedule generated looks",
+        `Schedule ${total} generated ${total === 1 ? "look" : "looks"}? They will also be saved to Your Outfits.`,
         [
-          { text: "Cancel", style: "cancel" },
+          { text: "Not now", style: "cancel" },
           { text: "Schedule", onPress: () => void scheduleGeneratedOutfits(false) },
         ],
         { cancelable: true },
@@ -858,8 +898,8 @@ export default function OutfitSuggestionsScreen() {
     }
 
     Alert.alert(
-      "Schedule outfits",
-      `${existingCount} day(s) already have a scheduled outfit.`,
+      "Schedule generated looks",
+      `${existingCount} selected ${existingCount === 1 ? "day already has" : "days already have"} a scheduled look.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -874,7 +914,7 @@ export default function OutfitSuggestionsScreen() {
 
   const handleRemoveSchedule = async (dateKey: string, planId: number) => {
     if (!getAuthToken()) {
-      showAuthRequired("Please sign in to manage your schedule.");
+      showAuthRequired("Sign in to manage your outfit schedule.");
       return;
     }
     try {
@@ -885,10 +925,16 @@ export default function OutfitSuggestionsScreen() {
         delete next[dateKey];
         return next;
       });
+      showNotice(
+        "info",
+        "Removed from schedule",
+        "This day no longer has a scheduled look.",
+      );
     } catch (err) {
       showNotice(
-        "Unable to remove scheduled outfit",
-        err instanceof Error ? err.message : "Failed to remove scheduled outfit.",
+        "error",
+        "Couldn't remove scheduled look",
+        err instanceof Error ? err.message : "Try again in a moment.",
       );
     } finally {
       setLoading(false);
@@ -914,7 +960,11 @@ export default function OutfitSuggestionsScreen() {
     const outfitForDate = getSchedulableOutfitForDate(dateKey);
     if (!scheduled) {
       if (!outfitForDate) {
-        showNotice("No outfit selected", "Generate an outfit before scheduling.");
+        showNotice(
+          "info",
+          "No look selected",
+          "Generate a look for this day before scheduling it.",
+        );
         return;
       }
 
@@ -923,8 +973,8 @@ export default function OutfitSuggestionsScreen() {
     }
 
     Alert.alert(
-      "Scheduled outfit",
-      "This day already has a scheduled outfit.",
+      "Day already scheduled",
+      "This day already has a saved look.",
       [
         {
           text: "View",
@@ -936,8 +986,9 @@ export default function OutfitSuggestionsScreen() {
             const replacement = outfitForDate;
             if (!replacement) {
               showNotice(
-                "No outfit selected",
-                "Select or generate an outfit for this day before replacing.",
+                "info",
+                "No replacement selected",
+                "Select or generate a look for this day before replacing it.",
               );
               return;
             }
@@ -976,11 +1027,15 @@ export default function OutfitSuggestionsScreen() {
   const handleGenerate = async () => {
     const token = getAuthToken();
     if (!token) {
-      showAuthRequired("Please sign in to load outfit recommendations.");
+      showAuthRequired("Sign in to load outfit recommendations.");
       return;
     }
     if (selectedDates.size === 0) {
-      showNotice("Select a day", "Select at least one day to generate outfits.");
+      showNotice(
+        "info",
+        "Select a day",
+        "Choose at least one day to generate looks.",
+      );
       return;
     }
     setGenerating(true);
@@ -989,7 +1044,9 @@ export default function OutfitSuggestionsScreen() {
       setGeneratedOutfitsByDate({});
       const closet = await contextApi.getCloset();
       if (!closet.length) {
-        showClosetRequired("Add items to your closet to unlock suggestions.");
+        showClosetRequired(
+          "Add at least one wardrobe item before generating suggestions.",
+        );
         setGenerating(false);
         return;
       }
@@ -1056,13 +1113,16 @@ export default function OutfitSuggestionsScreen() {
       );
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
-        showAuthRequired("Please sign in to load outfit recommendations.");
+        showAuthRequired("Sign in to load outfit recommendations.");
       } else if (isApiError(err) && err.status === 400 && err.message.includes("Closet")) {
-        showClosetRequired("Add items to your closet to unlock suggestions.");
+        showClosetRequired(
+          "Add at least one wardrobe item before generating suggestions.",
+        );
       } else {
         showNotice(
-          "Unable to generate outfits",
-          err instanceof Error ? err.message : "Failed to generate",
+          "error",
+          "Couldn't generate looks",
+          err instanceof Error ? err.message : "Try again in a moment.",
         );
       }
       setApiOutfits([]);
@@ -1075,7 +1135,7 @@ export default function OutfitSuggestionsScreen() {
   const handleApprove = async () => {
     if (!editableOutfit) return;
     if (!getAuthToken()) {
-      showAuthRequired("Please sign in to approve outfits.");
+      showAuthRequired("Sign in to save this look.");
       return;
     }
 
@@ -1083,11 +1143,16 @@ export default function OutfitSuggestionsScreen() {
     setApprovalAction({ id: localId, type: "approve" });
     try {
       await ensureSavedOutfitId(editableOutfit);
-      showNotice("Outfit approved", "Saved to your outfits and ready for scheduling.");
+      showNotice(
+        "success",
+        "Look saved",
+        "This look is now ready to schedule.",
+      );
     } catch (err) {
       showNotice(
-        "Unable to save outfit",
-        err instanceof Error ? err.message : "Failed to save outfit.",
+        "error",
+        "Couldn't save this look",
+        err instanceof Error ? err.message : "Try saving this look again.",
       );
     } finally {
       setApprovalAction((prev) => (prev?.id === localId ? null : prev));
@@ -1099,12 +1164,12 @@ export default function OutfitSuggestionsScreen() {
 
     const localId = getLocalOutfitId(editableOutfit);
     Alert.alert(
-      "Cancel outfit",
-      "Remove this generated outfit from the current suggestions?",
+      "Remove suggestion",
+      "Remove this generated look from the current suggestions?",
       [
         { text: "Keep", style: "cancel" },
         {
-          text: "Cancel outfit",
+          text: "Remove",
           style: "destructive",
           onPress: () => {
             setDismissingOutfitId(localId);
@@ -1127,19 +1192,20 @@ export default function OutfitSuggestionsScreen() {
 
     if (isOutfitScheduled(editableOutfit)) {
       showNotice(
-        "Cannot cancel approval",
-        "This outfit is already scheduled. Remove it from the schedule first.",
+        "info",
+        "Look is already scheduled",
+        "Remove it from the schedule before removing it from Your Outfits.",
       );
       return;
     }
 
     Alert.alert(
-      "Cancel approval",
-      "Remove this saved outfit from your approved outfits?",
+      "Remove saved look",
+      "Remove this look from Your Outfits?",
       [
         { text: "Keep", style: "cancel" },
         {
-          text: "Cancel approval",
+          text: "Remove",
           style: "destructive",
           onPress: async () => {
             setApprovalAction({ id: localId, type: "cancel" });
@@ -1150,11 +1216,16 @@ export default function OutfitSuggestionsScreen() {
                 delete next[localId];
                 return next;
               });
-              showNotice("Approval cancelled", "This outfit is no longer saved.");
+              showNotice(
+                "info",
+                "Saved look removed",
+                "This look is no longer in Your Outfits.",
+              );
             } catch (err) {
               showNotice(
-                "Unable to cancel approval",
-                err instanceof Error ? err.message : "Failed to cancel approval.",
+                "error",
+                "Couldn't remove saved look",
+                err instanceof Error ? err.message : "Try removing it again.",
               );
             } finally {
               setApprovalAction((prev) =>
@@ -1437,6 +1508,24 @@ export default function OutfitSuggestionsScreen() {
               <View style={styles.editableActionRow}>
                 <TouchableOpacity
                   style={[
+                    styles.cancelGeneratedButton,
+                    styles.editableActionButton,
+                    isDismissingOutfit(editableOutfit) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleDismissGenerated}
+                  disabled={
+                    Boolean(getApprovalAction(editableOutfit)) ||
+                    isDismissingOutfit(editableOutfit)
+                  }
+                >
+                  {isDismissingOutfit(editableOutfit) ? (
+                    <ActivityIndicator color="#C44536" />
+                  ) : (
+                    <Text style={styles.cancelGeneratedText}>Cancel</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
                     styles.approveButton,
                     styles.editableActionButton,
                     getApprovalAction(editableOutfit) === "approve" &&
@@ -1452,24 +1541,6 @@ export default function OutfitSuggestionsScreen() {
                     <ActivityIndicator color={theme.colors.text} />
                   ) : (
                     <Text style={styles.approveText}>Approve outfit</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.cancelGeneratedButton,
-                    styles.editableActionButton,
-                    isDismissingOutfit(editableOutfit) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleDismissGenerated}
-                  disabled={
-                    Boolean(getApprovalAction(editableOutfit)) ||
-                    isDismissingOutfit(editableOutfit)
-                  }
-                >
-                  {isDismissingOutfit(editableOutfit) ? (
-                    <ActivityIndicator color="#C44536" />
-                  ) : (
-                    <Text style={styles.cancelGeneratedText}>Cancel</Text>
                   )}
                 </TouchableOpacity>
               </View>

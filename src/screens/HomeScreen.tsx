@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -15,6 +17,7 @@ import BottomNav from "../components/BottomNav";
 import OutfitCard from "../components/OutfitCard";
 import { theme } from "../constants/theme";
 import { usePersonalScheduleEntries } from "../hooks/usePersonalScheduleEntries";
+import { useProfile } from "../hooks/useProfile";
 import { getAuthToken, isApiError } from "../services/apiClient";
 import {
   contextApi,
@@ -23,7 +26,7 @@ import {
   outfitPlanApi,
 } from "../services/outfitApi";
 import { mapRecommendationsToOutfits } from "../utils/outfitMapper";
-import { setOutfitCache } from "../utils/outfitStore";
+import { getOutfitById, setOutfitCache } from "../utils/outfitStore";
 import {
   addScheduleDays,
   atScheduleNoon,
@@ -40,6 +43,7 @@ import type { NormalizedWeather, OutfitPlan } from "../services/types";
 
 const FALLBACK_IMAGE =
   "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80";
+const FALLBACK_AVATAR = "https://via.placeholder.com/150";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const buildWeatherDays = (count = 7) => {
@@ -81,8 +85,16 @@ const toPlannedOutfit = (plan: OutfitPlan): Outfit => {
   };
 };
 
+const withHomeOutfitIds = (outfits: Outfit[]) =>
+  outfits.map((outfit) => ({
+    ...outfit,
+    id: `home-${outfit.id}`,
+  }));
+
 export default function HomeScreen() {
   const router = useRouter();
+  const { profile, refetch: refetchProfile } = useProfile();
+  const greetingMotion = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [heroOutfit, setHeroOutfit] = useState<Outfit | null>(null);
@@ -93,23 +105,35 @@ export default function HomeScreen() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [requiresCloset, setRequiresCloset] = useState(false);
   const [dailyWeather, setDailyWeather] = useState<
-    Array<{
+    {
       key: string;
       label: string;
       dayNumber: number;
       date: Date;
       weather: NormalizedWeather | null;
-    }>
+    }[]
   >([]);
   const [scheduledByDate, setScheduledByDate] = useState<
     Record<string, { title: string; outfitId: number; image: string }>
   >({});
   const { entries: personalScheduleEntries } = usePersonalScheduleEntries();
+  const userProfile = profile?.profile || profile;
+  const avatarUri = userProfile?.avatar || FALLBACK_AVATAR;
+  const firstName = useMemo(() => {
+    const rawName = userProfile?.fullName?.trim();
+    return rawName ? rawName.split(/\s+/)[0] : null;
+  }, [userProfile?.fullName]);
 
   const todayLabel = useMemo(() => {
     const today = new Date();
     return DAY_LABELS[today.getDay()];
   }, []);
+  const greetingTitle = useMemo(() => {
+    const hour = new Date().getHours();
+    const baseGreeting =
+      hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    return firstName ? `${baseGreeting}, ${firstName}` : `${baseGreeting}!`;
+  }, [firstName]);
   const todayScheduleKey = useMemo(
     () => formatScheduleDateKey(atScheduleNoon(new Date())),
     [],
@@ -129,6 +153,70 @@ export default function HomeScreen() {
       ),
     [dailyWeather, personalScheduleEntries],
   );
+  const greetingSubtitle = useMemo(() => {
+    if (requiresAuth) {
+      return "Sign in to unlock your personalized style plan.";
+    }
+
+    if (requiresCloset) {
+      return "Add a few wardrobe pieces and we will build sharper daily looks.";
+    }
+
+    if (todayPersonalEntries.length) {
+      return `${todayPersonalEntries.length} routine${
+        todayPersonalEntries.length === 1 ? "" : "s"
+      } already shaping today's outfit ideas.`;
+    }
+
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      return "Start the day with a look that feels easy, polished, and ready.";
+    }
+    if (hour < 18) {
+      return "Keep the day moving with a look that matches what comes next.";
+    }
+    return "Wind down with a look worth repeating tonight.";
+  }, [requiresAuth, requiresCloset, todayPersonalEntries.length]);
+  const greetingTranslateX = useMemo(
+    () =>
+      greetingMotion.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 8],
+      }),
+    [greetingMotion],
+  );
+  const greetingOpacity = useMemo(
+    () =>
+      greetingMotion.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.9, 1],
+      }),
+    [greetingMotion],
+  );
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(greetingMotion, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(greetingMotion, {
+          toValue: 0,
+          duration: 2200,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [greetingMotion]);
 
   useEffect(() => {
     let isActive = true;
@@ -166,7 +254,9 @@ export default function HomeScreen() {
           weather,
           closet,
         });
-        const mapped = mapRecommendationsToOutfits(result, closet, weather);
+        const mapped = withHomeOutfitIds(
+          mapRecommendationsToOutfits(result, closet, weather),
+        );
         if (!isActive) return;
         setRequiresAuth(false);
         setRequiresCloset(false);
@@ -204,6 +294,17 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (getAuthToken()) {
+        void refetchProfile();
+      }
+
+      if (heroOutfit) {
+        const cachedHero = getOutfitById(heroOutfit.id);
+        if (cachedHero) {
+          setHeroOutfit(cachedHero);
+        }
+      }
+
       let isActive = true;
       const loadPlans = async () => {
         if (!getAuthToken()) {
@@ -240,7 +341,7 @@ export default function HomeScreen() {
       return () => {
         isActive = false;
       };
-    }, []),
+    }, [heroOutfit, refetchProfile]),
   );
 
   useEffect(() => {
@@ -306,11 +407,19 @@ export default function HomeScreen() {
         >
           <View style={styles.heroCard}>
             <View style={styles.heroRow}>
-              <View>
-                <Text style={styles.heroTitle}>Hello!</Text>
-                <Text style={styles.heroSubtitle}>
-                  Good morning! Have a good day
-                </Text>
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroEyebrow}>Daily style note</Text>
+                <Animated.View
+                  style={[
+                    {
+                      opacity: greetingOpacity,
+                      transform: [{ translateX: greetingTranslateX }],
+                    },
+                  ]}
+                >
+                  <Text style={styles.heroTitle}>{greetingTitle}</Text>
+                  <Text style={styles.heroSubtitle}>{greetingSubtitle}</Text>
+                </Animated.View>
               </View>
               <View style={styles.heroActions}>
                 <TouchableOpacity
@@ -319,15 +428,16 @@ export default function HomeScreen() {
                 >
                   <Ionicons name="calendar-outline" size={18} color={theme.colors.text} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.heroIcon}>
-                  <Ionicons name="notifications-outline" size={18} color={theme.colors.text} />
-                </TouchableOpacity>
-                <View style={styles.avatar}>
+                <TouchableOpacity
+                  style={styles.avatar}
+                  activeOpacity={0.85}
+                  onPress={() => router.push("/profile")}
+                >
                   <Image
-                    source={{ uri: FALLBACK_IMAGE }}
+                    source={{ uri: avatarUri }}
                     style={styles.avatarImage}
                   />
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -577,14 +687,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: theme.spacing.sm,
   },
+  heroCopy: {
+    flex: 1,
+    paddingRight: theme.spacing.sm,
+  },
+  heroEyebrow: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    color: theme.colors.textSoft,
+  },
   heroTitle: {
-    fontSize: 22,
+    marginTop: 4,
+    fontSize: 19,
     fontWeight: "700",
     color: theme.colors.text,
   },
   heroSubtitle: {
     marginTop: 6,
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 16,
     color: theme.colors.textMuted,
   },
   heroActions: {

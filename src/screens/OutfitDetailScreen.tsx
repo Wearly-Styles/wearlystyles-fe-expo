@@ -7,7 +7,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -22,6 +21,7 @@ import type {
 } from "../services/types";
 import { getOutfitById, setOutfitCache } from "../utils/outfitStore";
 import type { Outfit, OutfitItem } from "../constants/mockOutfits";
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 
 type OutfitDetailScreenProps = {
   outfitId: string;
@@ -85,11 +85,13 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
   const [closetItems, setClosetItems] = useState<NormalizedClosetItem[]>([]);
   const [closetLoading, setClosetLoading] = useState(false);
   const [savingChanges, setSavingChanges] = useState(false);
+  const [savingLook, setSavingLook] = useState(false);
   const [wearingToday, setWearingToday] = useState(false);
   const [wearingLoading, setWearingLoading] = useState(false);
 
   const numericOutfitId = Number(outfitId);
-  const canEditItems = Number.isInteger(numericOutfitId) && numericOutfitId > 0;
+  const isPersistedOutfit = Number.isInteger(numericOutfitId) && numericOutfitId > 0;
+  const canEditItems = Boolean((outfit ?? cachedOutfit)?.items.length);
   const displayOutfit = isEditing ? draftOutfit ?? outfit : outfit;
 
   useEffect(() => {
@@ -107,8 +109,7 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
   useEffect(() => {
     let isActive = true;
     const needsRemoteDetail =
-      Number.isInteger(numericOutfitId) &&
-      numericOutfitId > 0 &&
+      isPersistedOutfit &&
       (!cachedOutfit || !cachedOutfit.items.length);
 
     if (!needsRemoteDetail) {
@@ -140,11 +141,11 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
     return () => {
       isActive = false;
     };
-  }, [cachedOutfit, numericOutfitId]);
+  }, [cachedOutfit, isPersistedOutfit, numericOutfitId]);
 
   useEffect(() => {
     let isActive = true;
-    if (!canEditItems) {
+    if (!isPersistedOutfit) {
       return () => {
         isActive = false;
       };
@@ -177,7 +178,7 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
     return () => {
       isActive = false;
     };
-  }, [canEditItems, numericOutfitId]);
+  }, [isPersistedOutfit, numericOutfitId]);
 
   const selectedSwapCategory = useMemo(() => {
     if (!isEditing) return null;
@@ -225,9 +226,11 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
   }, [closetItems, draftOutfit, isEditing, selectedSlot]);
 
   const handleOpenEdit = async () => {
-    if (!canEditItems || !outfit) return;
+    if (!outfit) return;
     if (!outfit.items.length) {
-      Alert.alert("Cannot edit items", "This outfit does not have item details yet.");
+      showErrorToast("This look doesn't have item details yet.", {
+        title: "Can't edit items",
+      });
       return;
     }
 
@@ -246,9 +249,9 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
     } catch (error) {
       setDraftOutfit(null);
       setIsEditing(false);
-      Alert.alert(
-        "Unable to load wardrobe",
-        error instanceof Error ? error.message : "Failed to load wardrobe items.",
+      showErrorToast(
+        error instanceof Error ? error.message : "We couldn't load your wardrobe.",
+        { title: "Wardrobe unavailable" },
       );
     } finally {
       setClosetLoading(false);
@@ -279,7 +282,7 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
   };
 
   const handleSaveChanges = async () => {
-    if (!canEditItems || !draftOutfit) {
+    if (!draftOutfit) {
       return;
     }
 
@@ -292,12 +295,26 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
     );
 
     if (!items.length) {
-      Alert.alert("Unable to save", "Select at least one wardrobe item.");
+      showErrorToast("Choose at least one wardrobe item.", {
+        title: "Can't save changes",
+      });
       return;
     }
 
     setSavingChanges(true);
     try {
+      if (!isPersistedOutfit) {
+        setOutfit(draftOutfit);
+        setOutfitCache([draftOutfit]);
+        setDraftOutfit(null);
+        setIsEditing(false);
+        setSelectedSlot(0);
+        showSuccessToast("Your edits were applied to this suggestion.", {
+          title: "Suggestion updated",
+        });
+        return;
+      }
+
       const updated = await outfitApi.updateOutfit(numericOutfitId, {
         name: draftOutfit.title,
         occasion: draftOutfit.subtitle || undefined,
@@ -310,26 +327,78 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
       setDraftOutfit(null);
       setIsEditing(false);
       setSelectedSlot(0);
-      Alert.alert(
-        "Outfit updated",
-        "Scheduled outfit items were updated. Any schedule using this saved outfit will use the new version.",
+      showSuccessToast(
+        "Saved changes to this outfit. Scheduled days using it will use the latest version.",
+        { title: "Outfit updated" },
       );
     } catch (error) {
-      Alert.alert(
-        "Unable to update outfit",
-        error instanceof Error ? error.message : "Failed to update outfit.",
+      showErrorToast(
+        error instanceof Error ? error.message : "We couldn't save your outfit changes.",
+        { title: "Couldn't update outfit" },
       );
     } finally {
       setSavingChanges(false);
     }
   };
 
-  const handleWearToday = async () => {
-    if (!canEditItems) {
-      Alert.alert(
-        "Cannot mark as worn",
-        "Save or schedule this outfit first before using Wear today.",
+  const handleSaveLook = async () => {
+    const activeOutfit = displayOutfit ?? outfit;
+    if (!activeOutfit) return;
+
+    const items = Array.from(
+      new Set(
+        activeOutfit.items
+          .map((item) => getClosetItemId(item))
+          .filter((id) => Number.isFinite(id)),
+      ),
+    );
+
+    if (!items.length) {
+      showErrorToast("Choose at least one wardrobe item before saving this look.", {
+        title: "Can't save look",
+      });
+      return;
+    }
+
+    setSavingLook(true);
+    try {
+      const saved = await outfitApi.createOutfit({
+        name: activeOutfit.title,
+        occasion: activeOutfit.subtitle || undefined,
+        weather: activeOutfit.weather || undefined,
+        items,
+      });
+
+      if (!saved?.id) {
+        throw new Error("Save failed: missing outfit id.");
+      }
+
+      const savedOutfit: Outfit = {
+        ...activeOutfit,
+        id: String(saved.id),
+      };
+
+      setOutfit(savedOutfit);
+      setOutfitCache([savedOutfit]);
+      showSuccessToast("This look was added to Your Outfits.", {
+        title: "Look saved",
+      });
+      router.replace(`/outfit/${saved.id}`);
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "We couldn't save this look.",
+        { title: "Couldn't save look" },
       );
+    } finally {
+      setSavingLook(false);
+    }
+  };
+
+  const handleWearToday = async () => {
+    if (!isPersistedOutfit) {
+      showErrorToast("Save this look first before marking it as worn today.", {
+        title: "Save the look first",
+      });
       return;
     }
 
@@ -337,18 +406,13 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
     try {
       await outfitHistoryApi.wearToday({ outfitId: numericOutfitId });
       setWearingToday(true);
-      Alert.alert(
-        "Marked as worn",
-        "This outfit was added to your outfit history.",
-        [
-          { text: "Close", style: "cancel" },
-          { text: "View history", onPress: () => router.push("/outfit-history") },
-        ],
-      );
+      showSuccessToast("Added to your outfit history for today.", {
+        title: "Marked as worn",
+      });
     } catch (error) {
-      Alert.alert(
-        "Unable to mark outfit",
-        error instanceof Error ? error.message : "Failed to save outfit history.",
+      showErrorToast(
+        error instanceof Error ? error.message : "We couldn't update your outfit history.",
+        { title: "Couldn't mark as worn" },
       );
     } finally {
       setWearingLoading(false);
@@ -482,7 +546,9 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
               <View style={styles.editPanel}>
                 <Text style={styles.editTitle}>Swap from your wardrobe</Text>
                 <Text style={styles.editSubtitle}>
-                  Changes will update this saved outfit anywhere it is scheduled.
+                  {isPersistedOutfit
+                    ? "Changes will update this saved outfit anywhere it is scheduled."
+                    : "Changes update this local suggestion until you save the look."}
                 </Text>
                 {closetLoading ? (
                   <View style={styles.loadingRow}>
@@ -547,22 +613,40 @@ export default function OutfitDetailScreen({ outfitId }: OutfitDetailScreenProps
             </>
           ) : canEditItems ? (
             <>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleOpenEdit()}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, savingLook && styles.buttonDisabled]}
+                onPress={() => void handleOpenEdit()}
+                disabled={savingLook}
+              >
                 <Text style={styles.secondaryText}>Edit items</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryButton, (wearingLoading || wearingToday) && styles.buttonDisabled]}
-                onPress={() => void handleWearToday()}
-                disabled={wearingLoading || wearingToday}
-              >
-                {wearingLoading ? (
-                  <ActivityIndicator color={theme.colors.text} />
-                ) : (
-                  <Text style={styles.primaryText}>
-                    {wearingToday ? "Worn today" : "Wear today"}
-                  </Text>
-                )}
-              </TouchableOpacity>
+              {isPersistedOutfit ? (
+                <TouchableOpacity
+                  style={[styles.primaryButton, (wearingLoading || wearingToday) && styles.buttonDisabled]}
+                  onPress={() => void handleWearToday()}
+                  disabled={wearingLoading || wearingToday}
+                >
+                  {wearingLoading ? (
+                    <ActivityIndicator color={theme.colors.text} />
+                  ) : (
+                    <Text style={styles.primaryText}>
+                      {wearingToday ? "Worn today" : "Wear today"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.primaryButton, savingLook && styles.buttonDisabled]}
+                  onPress={() => void handleSaveLook()}
+                  disabled={savingLook}
+                >
+                  {savingLook ? (
+                    <ActivityIndicator color={theme.colors.text} />
+                  ) : (
+                    <Text style={styles.primaryText}>Save look</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <>
