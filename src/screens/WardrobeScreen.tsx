@@ -35,6 +35,8 @@ type WardrobeItem = {
   isFavorite: boolean;
 };
 
+const ALL_FILTER_LABEL = "All";
+
 const normalizeSearchValue = (value: string) =>
   value
     .normalize("NFD")
@@ -42,13 +44,29 @@ const normalizeSearchValue = (value: string) =>
     .trim()
     .toLowerCase();
 
+const buildCategoryFilters = (
+  categories: Array<{ name?: string | null }> | null | undefined,
+  items: WardrobeItem[],
+) => {
+  const backendLabels = (categories || [])
+    .map((category) => category.name?.trim())
+    .filter((label): label is string => Boolean(label));
+
+  const itemLabels = items
+    .map((item) => item.category?.trim())
+    .filter((label): label is string => Boolean(label));
+
+  const labels = [...backendLabels, ...itemLabels];
+  return [
+    ALL_FILTER_LABEL,
+    ...Array.from(new Set(labels.filter((label) => label !== ALL_FILTER_LABEL))),
+  ];
+};
+
 export default function WardrobeScreen() {
   const router = useRouter();
-  const filters = useMemo(
-    () => ["All", "Top", "Bottom", "Outerwear", "Shoes", "Accessory"],
-    [],
-  );
-  const [activeFilter, setActiveFilter] = useState(0);
+  const [filters, setFilters] = useState<string[]>([ALL_FILTER_LABEL]);
+  const [selectedFilter, setSelectedFilter] = useState(ALL_FILTER_LABEL);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<WardrobeItem[]>([]);
@@ -57,20 +75,25 @@ export default function WardrobeScreen() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const currentFilterLabel = filters[activeFilter] || filters[0] || "All";
+  const activeFilterIndex = Math.max(
+    0,
+    filters.findIndex((label) => label === selectedFilter),
+  );
+  const currentFilterLabel = selectedFilter || filters[0] || ALL_FILTER_LABEL;
   const visibleItems = useMemo(() => {
-    const label = filters[activeFilter];
     const normalizedQuery = normalizeSearchValue(deferredSearchQuery);
     return items.filter((item) => {
       const matchesFilter =
-        activeFilter === 0 || !label ? true : item.category === label;
+        selectedFilter === ALL_FILTER_LABEL || !selectedFilter
+          ? true
+          : item.category === selectedFilter;
       if (!matchesFilter) return false;
       if (!normalizedQuery) return true;
       return [item.title, item.category].some((value) =>
         normalizeSearchValue(value).includes(normalizedQuery),
       );
     });
-  }, [activeFilter, deferredSearchQuery, filters, items]);
+  }, [deferredSearchQuery, items, selectedFilter]);
 
   const loadCloset = useCallback(() => {
     let isActive = true;
@@ -84,10 +107,18 @@ export default function WardrobeScreen() {
         return;
       }
       try {
-        const closet = await contextApi.getCloset();
+        const [closet, categories] = await Promise.all([
+          contextApi.getCloset(),
+          clothingApi.listCategories().catch(() => null),
+        ]);
         const mapped = mapClosetToWardrobe(closet);
+        const nextFilters = buildCategoryFilters(categories, mapped);
         if (isActive) {
           setItems(mapped);
+          setFilters(nextFilters);
+          setSelectedFilter((prev) =>
+            nextFilters.includes(prev) ? prev : ALL_FILTER_LABEL,
+          );
           setRequiresAuth(false);
         }
       } catch (err) {
@@ -195,7 +226,7 @@ export default function WardrobeScreen() {
   };
 
   const handleSelectFilter = (index: number) => {
-    setActiveFilter(index);
+    setSelectedFilter(filters[index] || ALL_FILTER_LABEL);
     setIsFilterMenuOpen(false);
   };
 
@@ -283,7 +314,7 @@ export default function WardrobeScreen() {
                 {isFilterMenuOpen ? (
                   <View style={styles.filterDropdown}>
                     {filters.map((label, index) => {
-                      const isActive = index === activeFilter;
+                      const isActive = index === activeFilterIndex;
                       return (
                         <TouchableOpacity
                           key={label}
